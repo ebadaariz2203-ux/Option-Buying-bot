@@ -1,17 +1,13 @@
 from config import *
 from logger.logger import logger
-
-from risk.risk_manager import calculate_trade, calculate_pnl
-from risk.position_size import calculate_position_size
-from paper_trade.trade_validator import validate_trade
-
+from risk.risk_manager import calculate_pnl
 from paper_trade.paper_trade import (
     
     execute_paper_trade,
     save_trade,
-    check_trade_status
+
 )
-from telegram.telegram_bot import send_telegram_message
+
 from core.bot import TradingBot
 
 def main():
@@ -23,32 +19,22 @@ def main():
     print("=" * 50)
 
     bot = TradingBot()
+
    # Download Market Data
-    
+   
     data = bot.fetch_market_data()
 
     # Calculate Indicators
     data = bot.calculate_indicators(data)
 
-    # Generate Trading Signal
+    
     # Generate Trading Signal
     signal = bot.generate_trading_signal(data)
-
-
+   
     # Risk Management
     if signal != "NO TRADE":
 
-        # Temporary option premium for testing
-        entry_price = 180.00
-        atr = float(data.iloc[-1]["ATR"])
-
-        trade = calculate_trade(entry_price, atr)
-        position = calculate_position_size(
-            trade["Entry"],
-            trade["StopLoss"]
-        )
-
-        validation = validate_trade(position)
+        trade, position, validation = bot.manage_risk(signal, data)
 
         print("\n========== TRADE DETAILS ==========")
         print(f"Entry Price : {trade['Entry']}")
@@ -74,7 +60,7 @@ def main():
 
         if validation["Allowed"]:
 
-            paper_trade = execute_paper_trade(signal, trade)
+            paper_trade = bot.execute_trade(signal, trade)
 
             message = f"""
     📢 OPTION BUYING BOT
@@ -88,8 +74,7 @@ def main():
     Status : OPEN
     """
 
-            send_telegram_message(message)
-
+            bot.send_notification(message)
             print("\n========== PAPER TRADE ==========")
             print(f"Time        : {paper_trade['Time']}")
             print(f"Signal      : {paper_trade['Signal']}")
@@ -99,9 +84,7 @@ def main():
             print(f"Status      : {paper_trade['Status']}")
             print("=================================")
 
-            # Save Trade
-            save_trade(paper_trade)
-
+                      
         else:
 
             print("\nTrade Rejected.")
@@ -109,8 +92,7 @@ def main():
 
             # Trade Status
             current_price = 190.00
-
-            status = check_trade_status(current_price, trade)
+            status = bot.get_trade_status(current_price, trade)
 
             trade_status_message = f"""
     📊 TRADE UPDATE
@@ -122,7 +104,7 @@ def main():
     Status : {status}
     """
 
-            send_telegram_message(trade_status_message)
+            bot.send_notification(trade_status_message)
 
             print("\n========== TRADE STATUS ==========")
             print(f"Current Price : {current_price}")
@@ -132,7 +114,7 @@ def main():
             # Trade Result (PnL)
             exit_price = 210.00
 
-            result = calculate_pnl(entry_price, exit_price)
+            result = calculate_pnl(trade["Entry"], exit_price)
 
             print("\n========== TRADE RESULT ==========")
             print(f"Entry Price : {result['Entry']}")
@@ -161,8 +143,7 @@ def main():
     Status : {'PROFIT' if result['PnL'] > 0 else 'LOSS'}
     """
 
-            send_telegram_message(result_message)
-
+            bot.send_notification(result_message)
             print("\nTrade Saved Successfully.")
 
     else:
