@@ -20,6 +20,9 @@ def main():
 
     bot = TradingBot()
 
+    if not bot.check_market_session():
+        return
+
    # Download Market Data
    
     data = bot.fetch_market_data()
@@ -89,6 +92,8 @@ def main():
 
             print("\nTrade Rejected.")
             print(validation["Reason"])
+
+            return
 
             # Trade Status
             current_price = 190.00

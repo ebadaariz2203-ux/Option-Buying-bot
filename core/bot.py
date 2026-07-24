@@ -20,6 +20,7 @@ from paper_trade.paper_trade import (
         check_trade_status,
 )
 from telegram.telegram_bot import send_telegram_message
+from utils.market_session import is_market_open
 class TradingBot:
 
     def __init__(self):
@@ -90,6 +91,16 @@ class TradingBot:
 
         send_telegram_message(message)
 
-    def run(self):
-        data = self.fetch_market_data()
-        return data
+
+    def check_market_session(self):
+
+        if is_market_open():
+            return True
+
+        print("Market is Closed.")
+        return False
+
+
+def run(self):
+    data = self.fetch_market_data()
+    return data
