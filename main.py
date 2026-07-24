@@ -1,8 +1,6 @@
 from config import *
 from logger.logger import logger
 
-from market_data.market_data import get_nifty_data
-from strategy.strategy import generate_signal
 from risk.risk_manager import calculate_trade, calculate_pnl
 from risk.position_size import calculate_position_size
 from paper_trade.trade_validator import validate_trade
@@ -13,7 +11,6 @@ from paper_trade.paper_trade import (
     save_trade,
     check_trade_status
 )
-from option_chain.option_data import get_option_chain
 from telegram.telegram_bot import send_telegram_message
 from core.bot import TradingBot
 
@@ -34,18 +31,8 @@ def main():
     data = bot.calculate_indicators(data)
 
     # Generate Trading Signal
-    option = get_option_chain()
-    print("\n========== OPTION CHAIN ==========")
-    print(f"PCR        : {option['PCR']}")
-    print(f"Call OI    : {option['Call_OI']}")
-    print(f"Put OI     : {option['Put_OI']}")
-    print(f"ATM Strike : {option['ATM_Strike']}")
-    print("==================================")
-
-    signal = generate_signal(data, option)
-    print(f"\nTrading Signal : {signal}")
-
-    logger.info(f"Trading Signal : {signal}")
+    # Generate Trading Signal
+    signal = bot.generate_trading_signal(data)
 
 
     # Risk Management
