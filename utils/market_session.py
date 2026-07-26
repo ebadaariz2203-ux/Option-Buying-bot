@@ -10,7 +10,7 @@ def is_market_open():
     # Saturday = 5, Sunday = 6
     if now.weekday() >= 5:
         print("Market Closed (Weekend)")
-        return False
+        return True
 
     market_open = time(9, 15)
     market_close = time(15, 30)

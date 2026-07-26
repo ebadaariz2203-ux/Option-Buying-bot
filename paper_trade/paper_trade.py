@@ -53,3 +53,15 @@ def check_trade_status(current_price, trade):
 
     else:
         return "OPEN"
+def monitor_trade(current_price, trade):
+    """
+    Monitor paper trade status.
+    """
+
+    if current_price >= trade["Target"]:
+        return "TARGET HIT"
+
+    elif current_price <= trade["StopLoss"]:
+        return "STOP LOSS HIT"
+
+    return "OPEN"    

@@ -10,6 +10,8 @@ from indicators.indicators import (
 
 from option_chain.option_data import get_option_chain
 from strategy.strategy import generate_signal
+from strategy.strike_selector import select_option
+from strategy.strike_selector import select_best_strike
 from risk.risk_manager import calculate_trade
 from risk.position_size import calculate_position_size
 from paper_trade.trade_validator import validate_trade
@@ -20,7 +22,9 @@ from paper_trade.paper_trade import (
         check_trade_status,
 )
 from telegram.telegram_bot import send_telegram_message
+
 from utils.market_session import is_market_open
+
 class TradingBot:
 
     def __init__(self):
@@ -39,10 +43,23 @@ class TradingBot:
         data = calculate_atr(data)
 
         return data
+
     def generate_trading_signal(self, data):
 
-        option = get_option_chain()
+        close_price = float(data.iloc[-1]["Close"])
 
+       
+        option = get_option_chain(close_price)
+        print("\n========== AVAILABLE STRIKES ==========")
+
+        for strike in option["Strikes"]:
+            print(
+                f"{strike['Strike']} {strike['Type']} | "
+                f"OI: {strike['OI']} | "
+                f"Volume: {strike['Volume']}"
+    )
+        
+        print("=======================================")
         print("\n========== OPTION CHAIN ==========")
         print(f"PCR        : {option['PCR']}")
         print(f"Call OI    : {option['Call_OI']}")
@@ -51,8 +68,14 @@ class TradingBot:
         print("==================================")
 
         signal = generate_signal(data, option)
+        selected_strike = select_best_strike(signal, option)
 
         print(f"\nTrading Signal : {signal}")
+        if selected_strike:
+            print(f"Selected Strike: {selected_strike}")
+        else:
+            print("Selected Strike: None (No Trade Signal)")
+
         logger.info(f"Trading Signal : {signal}")
 
         return signal
@@ -100,7 +123,99 @@ class TradingBot:
         print("Market is Closed.")
         return False
 
+    def print_trade_details(self, trade):
 
-def run(self):
-    data = self.fetch_market_data()
-    return data
+        print("\n========== TRADE DETAILS ==========")
+        print(f"Entry Price : {trade['Entry']}")
+        print(f"ATR         : {trade['ATR']}")
+        print(f"ATR Mult.   : {trade['ATRMultiplier']}")
+        print(f"RiskReward  : 1:{trade['RiskReward']}")
+        print(f"Stop Loss   : {trade['StopLoss']}")
+        print(f"Target      : {trade['Target']}")
+        print("===================================")
+
+    def print_position_size(self, position):
+
+        print("\n========== POSITION SIZE ==========")
+        print(f"Capital      : {position['Capital']}")
+        print(f"Risk %       : {position['RiskPercent']}%")
+        print(f"Max Loss     : {position['MaxLoss']}")
+        print(f"Risk / Lot   : {position['RiskPerLot']}")
+        print(f"Lots to Buy  : {position['Lots']}")
+        print("===================================")
+
+    def print_validation(self, validation):
+
+        print("\n========== TRADE VALIDATION ==========")
+        print(f"Allowed : {validation['Allowed']}")
+        print(f"Reason  : {validation['Reason']}")
+        print("======================================")
+
+    def print_paper_trade(self, paper_trade):
+
+        print("\n========== PAPER TRADE ==========")
+        print(f"Time        : {paper_trade['Time']}")
+        print(f"Signal      : {paper_trade['Signal']}")
+        print(f"Entry       : {paper_trade['Entry']}")
+        print(f"Stop Loss   : {paper_trade['StopLoss']}")
+        print(f"Target      : {paper_trade['Target']}")
+        print(f"Status      : {paper_trade['Status']}")
+        print("=================================")
+
+    def execute_trade_flow(self, signal, trade):
+
+        paper_trade = self.execute_trade(signal, trade)
+
+        message = f"""
+    📢 OPTION BUYING BOT
+
+    Signal : {signal}
+
+    Entry : {trade['Entry']}
+    Stop Loss : {trade['StopLoss']}
+    Target : {trade['Target']}
+
+    Status : OPEN
+        """
+
+        self.send_notification(message)
+
+        self.print_paper_trade(paper_trade)
+
+        return paper_trade
+
+    def handle_validation(self, validation):
+
+        if validation["Allowed"]:
+            return True
+
+        print("\nTrade Rejected.")
+        print(validation["Reason"])
+
+        return False
+
+    def run(self):
+
+        if not self.check_market_session():
+            return
+
+        data = self.fetch_market_data()
+
+        data = self.calculate_indicators(data)
+
+        signal = self.generate_trading_signal(data)
+
+        if signal == "NO TRADE":
+            print("\nNo Trade Found.")
+            return
+
+        trade, position, validation = self.manage_risk(signal, data)
+
+        self.print_trade_details(trade)
+        self.print_position_size(position)
+        self.print_validation(validation)
+
+        if not self.handle_validation(validation):
+            return
+
+        self.execute_trade_flow(signal, trade)
