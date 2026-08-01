@@ -1,4 +1,4 @@
-from config import *
+from config.settings import *
 from core.bot import TradingBot
 
 
@@ -11,8 +11,13 @@ def main():
     print("=" * 50)
 
     bot = TradingBot()
-    bot.run()
+    bot.run_continuously()
 
 
 if __name__ == "__main__":
     main()
+
+
+
+
+   

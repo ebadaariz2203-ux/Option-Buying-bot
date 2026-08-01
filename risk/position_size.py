@@ -1,5 +1,4 @@
-from config import CAPITAL, RISK_PER_TRADE, LOT_SIZE
-
+from config.settings import CAPITAL, RISK_PER_TRADE, LOT_SIZE
 
 def calculate_position_size(entry_price, stop_loss):
 
@@ -9,10 +8,14 @@ def calculate_position_size(entry_price, stop_loss):
 
     lots = max_loss // risk_per_lot
 
+    
     return {
-        "Capital": CAPITAL,
-        "RiskPercent": RISK_PER_TRADE,
-        "MaxLoss": round(max_loss, 2),
-        "RiskPerLot": round(risk_per_lot, 2),
-        "Lots": int(lots)
-    }
+    "Capital": CAPITAL,
+    "RiskPercent": RISK_PER_TRADE,
+    "MaxLoss": round(max_loss, 2),
+    "RiskPerLot": round(risk_per_lot, 2),
+    "Lots": int(lots),
+    "Quantity": int(lots) * LOT_SIZE,
+    "EnoughCapital": lots >= 1,
+    "RequiredCapital": round(risk_per_lot, 2),
+}

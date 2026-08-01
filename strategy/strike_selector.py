@@ -47,4 +47,4 @@ def select_best_strike(signal, option_chain):
 
     best = max(strikes, key=lambda x: x["Volume"])
 
-    return f"{best['Strike']} {best['Type']}"    
+    return best

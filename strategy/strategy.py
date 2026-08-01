@@ -1,4 +1,4 @@
-def generate_signal(data, option):
+def generate_signal(data, option, debug=True):
     latest = data.iloc[-1]
 
     close = float(latest["Close"])
@@ -9,30 +9,32 @@ def generate_signal(data, option):
     pcr = float(option["PCR"])
     atr = float(latest["ATR"])
 
-    print("\n========== MARKET ANALYSIS ==========")
-    print(f"Close Price : {close:.2f}")
-    print(f"EMA 20      : {ema20:.2f}")
-    print(f"RSI         : {rsi:.2f}")
-    print(f"Volume      : {volume:.0f}")
-    print(f"Avg Volume  : {volume_avg:.0f}")
-    print(f"PCR         : {pcr}")
-    print(f"ATR         : {atr:.2f}")
-    print("=====================================\n")
+    if debug:
 
-    # Debug
-    print(f"Condition 1 (Close > EMA20): {close > ema20}")
-    print(f"Condition 2 (RSI > 60): {rsi > 60}")
-    print(f"Condition 3 (Close < EMA20): {close < ema20}")
-    print(f"Condition 4 (RSI < 40): {rsi < 40}")
-    print(f"Condition 5 (PCR > 1): {pcr > 1}")
-    print(f"Condition 6 (PCR < 1): {pcr < 1}")
+        print("\n========== MARKET ANALYSIS ==========")
+        print(f"Close Price : {close:.2f}")
+        print(f"EMA 20      : {ema20:.2f}")
+        print(f"RSI         : {rsi:.2f}")
+        print(f"Volume      : {volume:.0f}")
+        print(f"Avg Volume  : {volume_avg:.0f}")
+        print(f"PCR         : {pcr}")
+        print(f"ATR         : {atr:.2f}")
+        print("=====================================\n")    
 
+    if debug:
+
+        print(f"Condition 1 (Close > EMA20): {close > ema20}")
+        print(f"Condition 2 (RSI > 60): {rsi > 60}")
+        print(f"Condition 3 (Close < EMA20): {close < ema20}")
+        print(f"Condition 4 (RSI < 40): {rsi < 40}")
+        print(f"Condition 5 (PCR > 1): {pcr > 1}")
+        print(f"Condition 6 (PCR < 1): {pcr < 1}") 
 
     if close > ema20 and rsi > 60 and pcr > 1:
         return "BUY CALL"
 
     elif close < ema20 and rsi < 40 and pcr < 1:
-             return "BUY PUT"
+        return "BUY PUT"
 
     else:
-     return "NO TRADE"
+        return "NO TRADE"
