@@ -22,7 +22,12 @@ def plot_equity_curve():
 
         for row in reader:
 
-            equity += float(row["PnL"])
+            pnl_value = row.get("PnL", "").strip()
+
+            if pnl_value == "":
+                continue
+
+            equity += float(pnl_value)
             equity_curve.append(equity)
 
     plt.figure(figsize=(10, 5))
@@ -56,7 +61,7 @@ def plot_drawdown():
 
         for row in reader:
 
-            equity += float(row["PnL"])
+            equity += float(row["PnL"]) if row["PnL"] else 0
 
             if equity > peak:
                 peak = equity

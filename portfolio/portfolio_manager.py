@@ -7,6 +7,7 @@ Maintains Virtual Trading Balance
 from config.settings import CAPITAL
 
 balance = CAPITAL
+locked_capital = 0   # was previously undefined until reset_portfolio() ran -> caused NameError
 
 def get_balance():
     """
@@ -65,10 +66,10 @@ def reset_portfolio():
     Reset Portfolio Balance
     """
 
-    global balance
+    global balance, locked_capital
 
-    balance = CAPITAL  
-    locked_capital = 0 
+    balance = CAPITAL
+    locked_capital = 0
 
 def portfolio_summary():
     """

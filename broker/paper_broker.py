@@ -12,6 +12,11 @@ class PaperBroker(Broker):
 
         paper_trade = execute_paper_trade(signal, trade)
 
+        if paper_trade is None:
+            # execute_paper_trade returns None when there isn't enough
+            # available balance to lock -- don't crash, just skip the trade.
+            return None
+
         paper_trade["Status"] = "OPEN"
 
         return paper_trade

@@ -9,21 +9,53 @@ import os
 
 
 def execute_paper_trade(signal, trade):
+
     trade_value = trade["Entry"] * trade["Quantity"]
+
     if not lock_capital(trade_value):
 
         print("Insufficient Balance")
-
         return None
 
+
     trade_data = {
+
+        "OrderID": trade.get("OrderID", ""),
+        "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+
         "Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+
         "Signal": signal,
+
+        "Status": "OPEN",
+
         "Entry": trade["Entry"],
-        "StopLoss": trade["StopLoss"],
+
         "Target": trade["Target"],
-        "Status": "OPEN"
+
+        "StopLoss": trade["StopLoss"],
+
+
+        "ATR": trade.get("ATR", 0),
+
+        "ATRMultiplier": trade.get("ATRMultiplier", 0),
+
+        "RiskReward": trade.get("RiskReward", 0),
+
+
+        "Strike": trade.get("Strike", 0),
+
+        "OptionType": trade.get("OptionType", ""),
+
+
+        "Quantity": trade.get("Quantity", 0),
+
+
+        "PnL": ""
+
     }
+
+
     return trade_data
 
 
@@ -37,12 +69,21 @@ def save_trade(trade_data):
         writer = csv.DictWriter(
             file,
             fieldnames=[
+                "OrderID",
+                "Timestamp",
                 "Time",
                 "Signal",
+                "Status",
                 "Entry",
-                "StopLoss",
                 "Target",
-                "Status"
+                "StopLoss",
+                "ATR",
+                "ATRMultiplier",
+                "RiskReward",
+                "Strike",
+                "OptionType",
+                "Quantity",
+                "PnL"
             ]
         )
 

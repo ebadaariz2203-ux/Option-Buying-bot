@@ -25,6 +25,7 @@ def save_backtest_report(trade_log):
             "Target",
             "Exit",
             "Result",
+            "HoldingCandles",
             "PnL",
         ])
 
@@ -37,6 +38,7 @@ def save_backtest_report(trade_log):
                 trade["Target"],
                 trade["Exit"],
                 trade["Result"],
+                trade["HoldingCandles"],
                 trade["PnL"],
             ])
 

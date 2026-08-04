@@ -80,7 +80,8 @@ def calculate_performance():
 
         for row in reader:
 
-            total_trades += 1
+            if row["PnL"] == "":
+                continue
 
             pnl = float(row["PnL"])
 

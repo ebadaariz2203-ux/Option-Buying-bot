@@ -1,4 +1,14 @@
-def generate_signal(data, option, debug=True):
+from strategy.filters import (
+    bullish_filter,
+    bearish_filter,
+)
+
+from strategy.confirmation import (
+    bullish_confirmation,
+    bearish_confirmation,
+)
+
+def generate_signal(data, option=None, debug=True):
     latest = data.iloc[-1]
 
     close = float(latest["Close"])
@@ -6,7 +16,12 @@ def generate_signal(data, option, debug=True):
     rsi = float(latest["RSI"])
     volume = float(latest["Volume"])
     volume_avg = float(latest["Volume_Avg"])
-    pcr = float(option["PCR"])
+    if option is None:
+        pcr = None
+    else:
+        pcr = float(option["PCR"])
+
+
     atr = float(latest["ATR"])
 
     if debug:
@@ -27,14 +42,19 @@ def generate_signal(data, option, debug=True):
         print(f"Condition 2 (RSI > 60): {rsi > 60}")
         print(f"Condition 3 (Close < EMA20): {close < ema20}")
         print(f"Condition 4 (RSI < 40): {rsi < 40}")
+
+    if debug and pcr is not None:
+
         print(f"Condition 5 (PCR > 1): {pcr > 1}")
-        print(f"Condition 6 (PCR < 1): {pcr < 1}") 
+        print(f"Condition 6 (PCR < 1): {pcr < 1}")   
+    if bullish_filter(close, ema20, rsi):
 
-    if close > ema20 and rsi > 60 and pcr > 1:
-        return "BUY CALL"
+        if bullish_confirmation(pcr):
+            return "BUY CALL"
 
-    elif close < ema20 and rsi < 40 and pcr < 1:
-        return "BUY PUT"
+    if bearish_filter(close, ema20, rsi):
 
-    else:
-        return "NO TRADE"
+        if bearish_confirmation(pcr):
+            return "BUY PUT"
+
+    return "NO TRADE"

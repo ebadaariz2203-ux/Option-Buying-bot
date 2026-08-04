@@ -1,7 +1,34 @@
 import time
+from datetime import datetime
+
+# ===============================
+# Logger
+# ===============================
 
 from logger.logger import logger
-from market_data.market_data import get_nifty_data
+
+
+# ===============================
+# Config
+# ===============================
+
+from config.settings import (
+    BROKER,
+    DATA_PROVIDER,
+    PAPER_TRADING,
+)
+
+
+# ===============================
+# Market Data
+# ===============================
+
+from market_data.data_provider_factory import DataProviderFactory
+
+
+# ===============================
+# Indicators
+# ===============================
 
 from indicators.indicators import (
     calculate_ema,
@@ -10,58 +37,156 @@ from indicators.indicators import (
     calculate_atr,
 )
 
-from option_chain.option_data import get_option_chain
+
+# ===============================
+# Strategy
+# ===============================
+
 from strategy.strategy import generate_signal
 from strategy.strike_selector import select_best_strike
 
+
+# ===============================
+# Risk Management
+# ===============================
+
 from risk.position_size import calculate_position_size
 from risk.risk_manager import calculate_trade, calculate_pnl
+from risk.trailing_stop import update_trailing_stop
+from risk.break_even import move_to_break_even
+
+
+# ===============================
+# Trade Management
+# ===============================
+
+from trade.partial_exit import calculate_partial_exit
+
+from trade.trade_state import TradeState
+from trade.order_manager import OrderManager
+from trade.order_history import save_order_history
+from trade.position_manager import PositionManager
+from trade.position_monitor import PositionMonitor
+
+
+# ===============================
+# Broker
+# ===============================
+
+from broker.paper_broker import PaperBroker
+from broker.broker_factory import BrokerFactory
+
+
+# ===============================
+# Paper Trading
+# ===============================
 
 from paper_trade.trade_validator import validate_trade
+
 from paper_trade.paper_trade import (
     execute_paper_trade,
     save_trade,
     monitor_trade,
 )
 
-from telegram.telegram_bot import send_telegram_message
-from utils.market_session import is_market_open
-from market_simulator.simulator import simulate_price
 
-from trade.pnl_engine import get_trade_status
-from trade.trade_state import TradeState
-from trade.order_manager import OrderManager
-from trade.order_history import save_order_history
-from trade.position_manager import PositionManager
-
-from broker.paper_broker import PaperBroker
+# ===============================
+# Trade History
+# ===============================
 
 from trade_history.trade_history import save_trade_history
+
+
+# ===============================
+# Portfolio
+# ===============================
+
+from portfolio.portfolio_manager import portfolio_summary
+
+
+# ===============================
+# Analytics
+# ===============================
 
 from analytics.performance import calculate_performance
 from analytics.equity_curve import calculate_equity_curve
 
+
+# ===============================
+# Backtest
+# ===============================
+
 from backtest.backtest import run_backtest
 from backtest.report import save_backtest_report
 
+
+# ===============================
+# Reports
+# ===============================
+
 from reports.dashboard import show_dashboard
-from portfolio.portfolio_manager import portfolio_summary
-from trade.position_monitor import PositionMonitor
+
+
+# ===============================
+# Telegram
+# ===============================
+
+from telegram.telegram_bot import send_telegram_message
+
+
+# ===============================
+# Utilities / Simulator
+# ===============================
+
+from utils.market_session import is_market_open
+from market_simulator.simulator import simulate_price
+from trade.pnl_engine import get_trade_status
 
 class TradingBot:
 
+    
     def __init__(self):
 
         print("=" * 50)
         print("Trading Bot Initialized")
         print("=" * 50)
 
+        # Trade State
         self.trade_state = TradeState()
-        self.broker = PaperBroker()
-        self.order_manager = OrderManager(self.broker)
-        self.position_manager = PositionManager(self.trade_state)
-        self.position_monitor = PositionMonitor(self.position_manager)
 
+        # Data Provider
+        self.data_provider = DataProviderFactory.create_provider(
+            DATA_PROVIDER
+        )
+
+        # Broker
+        self.broker = BrokerFactory.create_broker(
+            BROKER
+        )
+
+        print("\n========== SYSTEM CONFIGURATION ==========")
+
+        print(f"Data Provider : {DATA_PROVIDER}")
+        print(f"Provider Class: {type(self.data_provider).__name__}")
+
+        print(f"Broker        : {BROKER}")
+        print(f"Broker Class  : {type(self.broker).__name__}")
+
+        print(f"Paper Trading : {PAPER_TRADING}")
+
+        print("==========================================")
+
+        # Managers
+        self.order_manager = OrderManager(self.broker)
+
+        self.position_manager = PositionManager(
+            self.trade_state
+        )
+
+        self.position_monitor = PositionMonitor(
+            self.position_manager
+        )
+       
     def run_continuously(self):
 
         print("\n========== LIVE TRADING STARTED ==========\n")
@@ -91,9 +216,13 @@ class TradingBot:
         finally:
 
             print("Trading Bot Closed Successfully.")
+
     def fetch_market_data(self):
+
         logger.info("Downloading Market Data...")
-        data = get_nifty_data()
+
+        data = self.data_provider.get_market_data()
+
         return data
 
     def calculate_indicators(self, data):
@@ -109,7 +238,7 @@ class TradingBot:
 
         close_price = float(data.iloc[-1]["Close"])
 
-        option = get_option_chain(close_price)
+        option = self.data_provider.get_option_chain(close_price)
         print("\n========== AVAILABLE STRIKES ==========")
 
         for strike in option["Strikes"]:
@@ -167,14 +296,34 @@ class TradingBot:
 
     # Place Order
         paper_trade = self.order_manager.place_order(signal, trade)
+        if paper_trade is None:
+            print("\nOrder Placement Failed.")
+            return None
+        trade["Quantity"] = 75
+        trade["PartialBooked"] = False
 
         # Save Order History
         save_order_history(paper_trade)
 
         # Add Trade Details
         paper_trade["Strike"] = selected_strike["Strike"]
+
         paper_trade["OptionType"] = selected_strike["Type"]
+
         paper_trade["Quantity"] = trade["Quantity"]
+
+        paper_trade["ATR"] = trade.get("ATR",0)
+
+        paper_trade["ATRMultiplier"] = trade.get("ATRMultiplier",0)
+
+        paper_trade["RiskReward"] = trade.get("RiskReward",0)
+
+        paper_trade["OrderID"] = paper_trade.get("OrderID","")
+
+        paper_trade["Timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        paper_trade["PnL"] = ""
+
 
         # Open Position
         self.position_manager.open_position(paper_trade)
@@ -206,94 +355,226 @@ class TradingBot:
         return paper_trade
     def monitor_open_trade(self, trade):
         """
-        Monitor paper trade using simulated prices.
+        Monitor paper trade using simulated prices
+        with trailing stop and break even protection.
         """
 
-        if not self.position_manager.has_position():
-
-            print("\nNo Active Position")
-
-            return None
 
         current_price = trade["Entry"]
-        start_time = time.time()
+
 
         print("\n========== TRADE MONITOR ==========")
 
+
         for i in range(5):
 
-            # Simulate live price
+
+            # ===============================
+            # Simulate Live Price
+            # ===============================
+
             current_price = simulate_price(current_price)
 
-            # Check trade status (OPEN / TARGET / STOP LOSS)
-            trade_status = monitor_trade(current_price, trade)
 
-            if trade_status == "TARGET HIT":
-                print("\nTarget Achieved!")
-                break
 
-            if trade_status == "STOP LOSS HIT":
-                print("\nStop Loss Triggered!")
-                break
+            # ===============================
+            # ATR Trailing Stop Loss
+            # ===============================
 
-            # Calculate Real-Time P&L
-            pnl_info = get_trade_status(
-                entry_price=trade["Entry"],
-                current_price=current_price,
-                quantity=1,
+            trade["StopLoss"] = update_trailing_stop(
+
+                current_price,
+
+                trade["StopLoss"],
+
+                trade["ATR"],
+
+                trade["ATRMultiplier"]
+
             )
 
-            print(f"""
-        Update #{i+1}
 
-        Current Price : {pnl_info['CurrentPrice']}
-        PnL           : {pnl_info['PnL']}
-        Return        : {pnl_info['Return']} %
-        Trade Status  : {trade_status}
-        """)
 
-            if trade_status != "OPEN":
+            # ===============================
+            # Break Even Protection
+            # ===============================
+
+            old_sl = trade["StopLoss"]
+
+
+            trade["StopLoss"] = move_to_break_even(
+
+                trade["Entry"],
+
+                current_price,
+
+                trade["StopLoss"]
+
+            )
+
+
+            if trade["StopLoss"] != old_sl:
+
+                print("\nBreak Even Activated!")
+
+
+
+            # ===============================
+            # Display Trade Status
+            # ===============================
+
+            print("\n----------------------------")
+
+            print(f"Candle        : {i+1}")
+
+            print(
+                f"Entry         : {trade['Entry']}"
+            )
+
+            print(
+                f"Current Price : {round(current_price,2)}"
+            )
+
+            print(
+                f"Stop Loss     : {trade['StopLoss']}"
+            )
+
+            print(
+                f"Target        : {trade['Target']}"
+            )
+
+            # ===============================
+            # Partial Profit Booking
+            # ===============================
+
+            if (
+                current_price >= trade["Target"]
+                and trade["PartialBooked"] == False
+            ):
+
+
+                exit_qty, remaining_qty = calculate_partial_exit(
+                    trade["Quantity"]
+                )
+
+
+                print("\nPartial Profit Booked!")
+
+                print(
+                    f"Exit Quantity : {exit_qty}"
+                )
+
+
+                print(
+                    f"Remaining Quantity : {remaining_qty}"
+                )
+
+
+                trade["Quantity"] = remaining_qty
+
+
+                # Move SL to Entry after partial booking
+
+                trade["StopLoss"] = trade["Entry"]
+
+
+                trade["PartialBooked"] = True
+
+            # ===============================
+            # Check Target / Stop Loss
+            # ===============================
+
+
+            trade_status = monitor_trade(
+
+                current_price,
+
+                trade
+
+            )
+
+
+
+            if trade_status == "TARGET HIT":
+
+                print("\n✅ Target Achieved!")
+
                 break
 
-            time.sleep(2)
 
-        # ===============================
-        # Loop finished
-        # ===============================
 
-        exit_price = current_price
-        end_time = time.time()
+            if trade_status == "STOP LOSS HIT":
 
-        duration_seconds = int(end_time - start_time)
+                print("\n❌ Stop Loss Triggered!")
 
-        minutes = duration_seconds // 60
-        seconds = duration_seconds % 60
+                break
 
-        duration = f"{minutes}m {seconds}s"
 
-        result = calculate_pnl(
-            trade["Entry"],
-            exit_price,
+
+            print("\nTrade Status : OPEN")
+
+
+
+            # ===============================
+            # Real Time P&L
+            # ===============================
+
+
+            pnl_status = get_trade_status(
+
+                entry_price=trade["Entry"],
+
+                current_price=current_price,
+
+                quantity=1
+
+            )
+
+
+            print(
+                f"P&L : {pnl_status}"
+            )
+
+
+
+            time.sleep(1)
+
+
+
+        print("\n========== TRADE MONITOR END ==========")
+
+
+
+        # Final Result
+
+        final_result = calculate_pnl(
+
+            entry_price=trade["Entry"],
+
+            exit_price=current_price,
+
+            quantity=trade["Quantity"]
+
         )
-        result["Time"] = trade["Time"]
-        result["Signal"] = trade["Signal"]
-        result["Duration"] = duration
-        result["StopLoss"] = trade["StopLoss"]
-        result["Target"] = trade["Target"]
-        result["Status"] = trade_status
-        save_trade_history(result)
-        self.position_manager.close_position()
 
-        print("\nPosition Closed Successfully.")
 
         print("\n========== FINAL RESULT ==========")
-        print(f"Entry  : {result['Entry']}")
-        print(f"Exit   : {result['Exit']}")
-        print(f"PnL    : {result['PnL']}")
-        print(f"Return : {result['PnLPercent']} %")
-        print("===================================")
 
-        return result
+        print(
+            f"Entry : {trade['Entry']}"
+        )
+
+        print(
+            f"Exit  : {round(current_price,2)}"
+        )
+
+        print(
+            f"Result : {final_result}"
+        )
+
+        print("=================================")
+
+       
 
     def send_notification(self, message):
 
@@ -301,12 +582,16 @@ class TradingBot:
 
     def check_market_session(self):
 
+        from config.settings import TESTING_MODE
+
+        if TESTING_MODE:
+            return True
+
         if is_market_open():
             return True
 
         print("Market is Closed.")
         return False
-
     def print_trade_details(self, trade):
 
         print("\n========== TRADE DETAILS ==========")
@@ -354,7 +639,7 @@ class TradingBot:
         print(f"Time        : {paper_trade['Time']}")
         print(f"Signal      : {paper_trade['Signal']}")
         print(f"Entry       : {paper_trade['Entry']}")
-        print(f"Stop Loss   : {paper_trade['StopLoss']}")
+        print(f"Stop Loss   : {paper_trade['StopLoss']}") 
         print(f"Target      : {paper_trade['Target']}")
         print(f"Status      : {paper_trade['Status']}")
         print("=================================")
@@ -458,11 +743,19 @@ class TradingBot:
 
     def run(self):
 
+        print("STEP 1")
+
         data = self.fetch_market_data()
+
+        print("STEP 2")
 
         data = self.calculate_indicators(data)
 
+        print("STEP 3")
+
         self.run_backtest_flow(data)
+
+        print("STEP 4")
 
         signal, selected_strike = self.generate_trading_signal(data)
 
@@ -484,31 +777,43 @@ class TradingBot:
             print("Skipping New Signal...")
 
             return
-      
+
+        print("STEP 5")
+
         trade, position, validation = self.manage_risk(signal, data)
 
         self.print_trade_details(trade)
         self.print_position_size(position)
         self.print_validation(validation)
-        portfolio = portfolio_summary()
 
+        portfolio = portfolio_summary()
         self.print_portfolio(portfolio)
 
         if not self.handle_validation(validation):
             return
+
+        print("STEP 6")
 
         paper_trade = self.execute_trade_flow(
             signal,
             trade,
             selected_strike,
         )
+        if paper_trade is None:
+            return
+
+        print("STEP 7")
 
         self.monitor_open_trade(paper_trade)
-       
+
+        print("STEP 8")
+
         self.show_performance()
+
+        print("STEP 9")
 
         self.show_equity_curve()
 
+        print("STEP 10")
+
         show_dashboard()
-            
-           

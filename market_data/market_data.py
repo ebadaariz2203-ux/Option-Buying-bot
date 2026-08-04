@@ -4,6 +4,7 @@ import yfinance as yf
 def get_nifty_data():
 
     data = yf.download(
+
         tickers="^NSEI",
         period="5d",
         interval="5m",
@@ -18,5 +19,8 @@ def get_nifty_data():
             data.columns = data.columns.get_level_values(0)
             if data.empty:
                 raise Exception("No market data received. Please check ticker symbol or internet connection.")
+    print("\n===== YFINANCE VOLUME =====")
+    print(data[["Close", "Volume"]].tail(10))
+    print("===========================\n")
 
     return data

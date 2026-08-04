@@ -1,10 +1,16 @@
-class Broker:
+from abc import ABC, abstractmethod
 
+
+class Broker(ABC):
+
+    @abstractmethod
     def place_order(self, signal, trade):
-        raise NotImplementedError
+        pass
 
+    @abstractmethod
     def close_order(self, trade):
-        raise NotImplementedError
+        pass
 
+    @abstractmethod
     def get_position(self):
-        raise NotImplementedError
+        pass

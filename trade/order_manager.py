@@ -18,15 +18,14 @@ class OrderManager:
 
         order = self.broker.place_order(signal, trade)
 
+        if order is None:
+            return None
+
         order["OrderID"] = self.generate_order_id()
-
         order["Status"] = ORDER_PENDING
-
-        # Paper Broker me order instantly execute hota hai
         order["Status"] = ORDER_FILLED
 
         return order
-
     def close_order(self):
 
         position = self.broker.get_position()

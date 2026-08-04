@@ -38,11 +38,11 @@ def run_backtest(data):
 
         close_price = float(candle.iloc[-1]["Close"])
 
-        option = get_option_chain(close_price)
-
+        
+        
         signal = generate_signal(
             candle,
-            option,
+            option=None,
             debug=False,
         )
         if signal != "NO TRADE":
@@ -69,6 +69,7 @@ def run_backtest(data):
                 "Target": trade["Target"],
                 "Exit": result["Exit"],
                 "Result": result["Result"],
+                "HoldingCandles": result["HoldingCandles"],
                 "PnL": round(result["Exit"] - trade["Entry"], 2),
             })
             

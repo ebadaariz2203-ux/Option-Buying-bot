@@ -21,15 +21,21 @@ def calculate_trade(entry_price, atr):
     
 
 
-def calculate_pnl(entry_price, exit_price):
+def calculate_pnl(entry_price, exit_price, quantity=1):
+    """
+    quantity should be lots * lot_size (e.g. 2 lots * 75 = 150),
+    otherwise PnL only reflects the per-unit premium move, not real money.
+    """
 
-    pnl = round(exit_price - entry_price, 2)
+    price_diff = round(exit_price - entry_price, 2)
+    pnl = round(price_diff * quantity, 2)
 
-    pnl_percent = round((pnl / entry_price) * 100, 2)
+    pnl_percent = round((price_diff / entry_price) * 100, 2)
 
     return {
         "Entry": entry_price,
         "Exit": exit_price,
+        "Quantity": quantity,
         "PnL": pnl,
         "PnLPercent": pnl_percent
     }
