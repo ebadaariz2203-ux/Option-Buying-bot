@@ -13,9 +13,13 @@ __pycache__/
 logs/
 *.log
 
+config/settings.py
+
 # Environment Variables
 .env
 
 # OS Files
 .DS_Store
 Thumbs.db
+
+trade_history/completed_trade_history.csv

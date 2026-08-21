@@ -1,0 +1,31 @@
+{
+    "project": "Option Buying Bot",
+    "version": "1.0.0",
+    "current_day": 88,
+    "features": [
+        "EMA 20",
+        "RSI",
+        "ATR",
+        "Option Chain",
+        "PCR Filter",
+        "EMA + RSI Strategy",
+        "Paper Trading",
+        "Order Manager",
+        "Position Manager",
+        "Portfolio Manager",
+        "Risk Manager",
+        "Position Sizing",
+        "Trade Validation",
+        "Trailing Stop Loss",
+        "Break Even",
+        "Partial Profit Booking",
+        "Backtest Engine",
+        "Performance Analytics",
+        "Equity Curve",
+        "Drawdown Chart",
+        "Telegram Notification",
+        "Trade History",
+        "Order History",
+        "Holding Time Analytics"
+    ]
+}

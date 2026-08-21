@@ -6,6 +6,8 @@ from backtest.backtest import run_backtest
 
 from backtest.report import save_backtest_report
 
+from analytics.trade_analytics import calculate_trade_analytics
+
 
 def main():
 
@@ -26,10 +28,21 @@ def main():
     print(f"Net P&L       : {backtest['NetPnL']}")
     print("=====================================")
 
+    trade_stats = calculate_trade_analytics(backtest["TradeLog"])
+
+    print("\n========== TRADE ANALYTICS ==========")
+    print(f"Average Winner   : {trade_stats['Average Winner']}")
+    print(f"Average Loser    : {trade_stats['Average Loser']}")
+    print(f"Largest Winner   : {trade_stats['Largest Winner']}")
+    print(f"Largest Loser    : {trade_stats['Largest Loser']}")
+    print(f"Max Win Streak   : {trade_stats['Max Win Streak']}")
+    print(f"Max Loss Streak  : {trade_stats['Max Loss Streak']}")
+    print("=====================================")
+
+   
     report = save_backtest_report(backtest["TradeLog"])
 
     print(f"\nReport Saved : {report}")
-
 
 if __name__ == "__main__":
     main()

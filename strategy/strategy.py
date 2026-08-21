@@ -23,6 +23,7 @@ def generate_signal(data, option=None, debug=True):
 
 
     atr = float(latest["ATR"])
+    adx = float(latest["ADX"])
 
     if debug:
 
@@ -34,6 +35,7 @@ def generate_signal(data, option=None, debug=True):
         print(f"Avg Volume  : {volume_avg:.0f}")
         print(f"PCR         : {pcr}")
         print(f"ATR         : {atr:.2f}")
+        print(f"ADX         : {adx:.2f}")
         print("=====================================\n")    
 
     if debug:
@@ -46,13 +48,14 @@ def generate_signal(data, option=None, debug=True):
     if debug and pcr is not None:
 
         print(f"Condition 5 (PCR > 1): {pcr > 1}")
-        print(f"Condition 6 (PCR < 1): {pcr < 1}")   
-    if bullish_filter(close, ema20, rsi):
+        print(f"Condition 6 (PCR < 1): {pcr < 1}")
+        print(f"Condition 7 (ADX > 25): {adx > 25}")   
+    if bullish_filter(close, ema20, rsi, adx):
 
         if bullish_confirmation(pcr):
             return "BUY CALL"
 
-    if bearish_filter(close, ema20, rsi):
+    if bearish_filter(close, ema20, rsi, adx):
 
         if bearish_confirmation(pcr):
             return "BUY PUT"

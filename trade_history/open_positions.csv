@@ -1,0 +1,1 @@
+OrderID,Timestamp,Time,Signal,Status,Entry,Target,StopLoss,ATR,ATRMultiplier,RiskReward,Risk,Strike,OptionType,Symbol,Quantity,OriginalQuantity,PartialBooked,PnL

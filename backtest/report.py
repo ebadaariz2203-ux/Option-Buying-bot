@@ -3,7 +3,7 @@ import os
 from datetime import datetime
 
 
-def save_backtest_report(trade_log):
+def save_backtest_report(trade_log, trade_stats=None):
 
     folder = "backtest/reports"
 
@@ -41,5 +41,16 @@ def save_backtest_report(trade_log):
                 trade["HoldingCandles"],
                 trade["PnL"],
             ])
+        if trade_stats:
 
-    return filename
+            writer.writerow([])
+            writer.writerow(["TRADE ANALYTICS"])
+
+            writer.writerow(["Average Winner", trade_stats["Average Winner"]])
+            writer.writerow(["Average Loser", trade_stats["Average Loser"]])
+            writer.writerow(["Largest Winner", trade_stats["Largest Winner"]])
+            writer.writerow(["Largest Loser", trade_stats["Largest Loser"]])
+            writer.writerow(["Max Win Streak", trade_stats["Max Win Streak"]])
+            writer.writerow(["Max Loss Streak", trade_stats["Max Loss Streak"]])
+
+        return filename

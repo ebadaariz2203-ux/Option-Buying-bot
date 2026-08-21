@@ -1,6 +1,7 @@
 from market_data.yfinance_provider import YFinanceProvider
 from market_data.angelone_provider import AngelOneProvider
 from market_data.zerodha_provider import ZerodhaProvider
+from market_data.kite_provider import KiteProvider
 
 class DataProviderFactory:
 
@@ -8,6 +9,7 @@ class DataProviderFactory:
         "YFINANCE",
         "ANGELONE",
         "ZERODHA",
+        "KITE",
     )
 
     @staticmethod
@@ -37,4 +39,7 @@ Available Providers:
 
         if provider_name == "ZERODHA":
             return ZerodhaProvider()
+
+        if provider_name == "KITE":
+            return KiteProvider()
 

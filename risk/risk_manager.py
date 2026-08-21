@@ -6,9 +6,18 @@ def calculate_trade(entry_price, atr):
 
     risk = atr * ATR_MULTIPLIER
 
-    stop_loss = round(entry_price - risk, 2)
+    stop_loss = max(0.05, round(entry_price - risk, 2))
 
     target = round(entry_price + (risk * RISK_REWARD), 2)
+
+
+    print("\n===== TRADE CALCULATION =====")
+    print(f"Entry      : {entry_price}")
+    print(f"ATR        : {atr}")
+    print(f"Risk       : {risk}")
+    print(f"Stop Loss  : {stop_loss}")
+    print(f"Target     : {target}")
+    print("=============================")
 
     return {
         "Entry": round(entry_price, 2),

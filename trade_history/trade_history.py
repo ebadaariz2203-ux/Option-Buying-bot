@@ -3,15 +3,31 @@ import os
 from datetime import datetime
 
 
-def save_trade_history(result):
+def load_trade_history():
 
     file_name = "trade_history/trade_history.csv"
+
+    if not os.path.exists(file_name):
+        return []
+
+    with open(file_name, "r") as file:
+
+        reader = csv.DictReader(file)
+
+        return list(reader)
+
+
+def save_trade_history(result):
+
+    file_name = "trade_history/completed_trade_history.csv"
+    os.makedirs("trade_history", exist_ok=True)
+
     file_exists = os.path.exists(file_name)
+
     now = datetime.now()
 
     trade_date = now.strftime("%Y-%m-%d")
     exit_time = now.strftime("%H:%M:%S")
-    "Duration",
 
     with open(file_name, "a", newline="") as file:
 
@@ -22,7 +38,6 @@ def save_trade_history(result):
                 "Date",
                 "EntryTime",
                 "ExitTime",
-                "Duration",
                 "Signal",
                 "Entry",
                 "Exit",
@@ -32,13 +47,11 @@ def save_trade_history(result):
                 "PnL",
                 "Return",
             ])
-            
 
         writer.writerow([
             trade_date,
             result["Time"],
             exit_time,
-            result["Duration"],
             result["Signal"],
             result["Entry"],
             result["Exit"],

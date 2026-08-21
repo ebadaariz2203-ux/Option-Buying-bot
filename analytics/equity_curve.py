@@ -19,7 +19,7 @@ def calculate_equity_curve():
 
         for row in reader:
 
-            pnl_value = row.get("PnL", "").strip()
+            pnl_value = (row.get("PnL") or "").strip()
 
             if pnl_value == "":
                 continue

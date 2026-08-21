@@ -47,6 +47,10 @@ def run_backtest(data):
         )
         if signal != "NO TRADE":
 
+            print("\n===== BACKTEST DEBUG =====")
+            print(f"Index Price : {close_price}")
+            print("==========================")
+
             entry = close_price
 
             atr = float(candle.iloc[-1]["ATR"])

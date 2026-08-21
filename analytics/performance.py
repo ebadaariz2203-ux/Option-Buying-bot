@@ -1,6 +1,7 @@
 import csv
 import os
-
+from trade_history.trade_history import load_trade_history
+from logger.logger import logger
 import statistics
 def calculate_max_drawdown(equity_curve):
 
@@ -54,8 +55,12 @@ def calculate_sharpe_ratio(trades):
 
 
 def calculate_performance():
+    file_name = "trade_history/completed_trade_history.csv"
 
-    file_name = "trade_history/trade_history.csv"
+    logger.debug("========== PERFORMANCE DEBUG ==========")
+    logger.debug(f"File : {file_name}")
+    logger.debug(f"Exists : {os.path.exists(file_name)}")
+    logger.debug("======================================")
 
     if not os.path.exists(file_name):
         return None
@@ -80,10 +85,25 @@ def calculate_performance():
 
         for row in reader:
 
-            if row["PnL"] == "":
+            logger.debug(f"{row}")
+
+            pnl_value = row.get("PnL")
+
+            # Skip blank or None values
+            if pnl_value is None:
                 continue
 
-            pnl = float(row["PnL"])
+            pnl_value = str(pnl_value).strip()
+
+            if pnl_value == "":
+                continue
+
+            try:
+                pnl = float(pnl_value)
+            except (ValueError, TypeError):
+                continue
+
+            total_trades += 1
 
             trades.append(pnl)
 
@@ -105,7 +125,7 @@ def calculate_performance():
 
             if pnl < worst_trade:
                 worst_trade = pnl
-
+             
     win_rate = 0
 
     if total_trades > 0:
@@ -146,4 +166,3 @@ def calculate_performance():
         "Expectancy": calculate_expectancy(trades),
         "SharpeRatio": calculate_sharpe_ratio(trades),
     }
-    

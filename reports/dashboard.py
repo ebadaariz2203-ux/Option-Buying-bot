@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 
 def plot_equity_curve():
 
-    file_name = "trade_history/trade_history.csv"
+    file_name = "trade_history/completed_trade_history.csv"
 
     if not os.path.exists(file_name):
         print("Trade history not found.")
@@ -22,7 +22,7 @@ def plot_equity_curve():
 
         for row in reader:
 
-            pnl_value = row.get("PnL", "").strip()
+            pnl_value = (row.get("PnL") or "").strip()
 
             if pnl_value == "":
                 continue
@@ -95,6 +95,9 @@ def plot_win_loss():
 
         for row in reader:
 
+            if not row["PnL"]:
+                continue
+
             pnl = float(row["PnL"])
 
             if pnl > 0:
@@ -102,7 +105,9 @@ def plot_win_loss():
 
             elif pnl < 0:
                 loss += 1
-
+    if win == 0 and loss == 0:
+        print("No valid Win/Loss data available.")
+        return
     plt.figure(figsize=(5, 5))
 
     plt.pie(
@@ -117,7 +122,7 @@ def plot_win_loss():
 
 def monthly_summary():
 
-    file_name = "trade_history/trade_history.csv"
+    file_name = "trade_history/completed_trade_history.csv"
 
     if not os.path.exists(file_name):
         return
@@ -131,6 +136,9 @@ def monthly_summary():
         for row in reader:
 
             month = row["Date"][:7]
+            if not row["PnL"]:
+                continue
+
             monthly[month] += float(row["PnL"])
 
     print("\nMonthly Summary\n")
