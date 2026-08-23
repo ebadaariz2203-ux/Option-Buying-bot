@@ -21,6 +21,7 @@ from config.settings import (
     TRADE_MONITOR_INTERVAL,
     RUN_BACKTEST,
     PARTIAL_EXIT_ENABLE,
+    PARTIAL_EXIT_TRIGGER_RR,
     BREAK_EVEN_TRIGGER_RR,
     SIGNAL_CONFIRMATIONS_REQUIRED,
     NO_NEW_ENTRY_AFTER,
@@ -846,9 +847,18 @@ class TradingBot:
             # PARTIAL PROFIT BOOKING
             # ==========================================
 
+            # NEW: trigger partial booking once profit reaches
+            # PARTIAL_EXIT_TRIGGER_RR x the trade's own initial risk,
+            # instead of waiting for the full Target. The full Target
+            # was often not reached before a reversal gave back the
+            # entire unrealized profit via the trailing stop.
+            partial_exit_price = (
+                trade["Entry"] + (trade["Risk"] * PARTIAL_EXIT_TRIGGER_RR)
+            )
+
             if (
                 PARTIAL_EXIT_ENABLE
-                and current_price >= trade["Target"]
+                and current_price >= partial_exit_price
                 and trade.get("PartialBooked", False) is False
             ):
 

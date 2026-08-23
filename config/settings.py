@@ -3,7 +3,7 @@ BOT_NAME = "Option Buying Bot"
 VERSION = "1.0"
 PAPER_TRADING = True
 
-ATR_MULTIPLIER = 1.5
+ATR_MULTIPLIER = 1.0
 RISK_REWARD = 2
 
 CAPITAL = 50000
@@ -25,6 +25,14 @@ BREAK_EVEN_TRIGGER_RR = 1.0
 PARTIAL_EXIT_ENABLE = True
 
 PARTIAL_EXIT_PERCENT = 50
+
+# NEW: Partial exit now triggers once the trade has moved this many
+# R-multiples (of its own initial risk) in profit, instead of only at
+# the full Target. Full Target (RISK_REWARD = 2, i.e. 2R) was often
+# not reached before a reversal gave back the entire unrealized gain
+# via the trailing stop. Booking half the position at 1.5R locks in
+# profit on strong moves even if price never reaches the full target.
+PARTIAL_EXIT_TRIGGER_RR = 1.5
 
 TESTING_MODE = True
 # Market session bypass
