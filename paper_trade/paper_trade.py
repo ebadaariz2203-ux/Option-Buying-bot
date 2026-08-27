@@ -9,19 +9,29 @@ from portfolio.portfolio_manager import (
     update_balance,
 )
 
+from config.settings import LAST_TRADE_FORCE_EXIT_TIME
+
 
 def is_eod_exit_time():
     """
     Returns True when intraday EOD exit time is reached.
     Indian market time: Asia/Kolkata
+
+    FIX: previously hardcoded exit_hour=15, exit_minute=20 here,
+    completely separate from settings.py's LAST_TRADE_FORCE_EXIT_TIME
+    ("15:10"). Two different EOD cutoffs existed in the system at
+    once (15:10 vs 15:20) that could silently disagree. Now this
+    reads the same setting bot.py's "LAST TRADE FORCE EXIT" block
+    uses, so there is exactly one EOD cutoff time everywhere.
     """
 
     now = datetime.now(
         ZoneInfo("Asia/Kolkata")
     )
 
-    exit_hour = 15
-    exit_minute = 20
+    exit_hour, exit_minute = map(
+        int, LAST_TRADE_FORCE_EXIT_TIME.split(":")
+    )
 
     if (
         now.hour > exit_hour

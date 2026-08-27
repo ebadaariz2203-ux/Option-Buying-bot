@@ -25,6 +25,11 @@ from config.settings import (
     BREAK_EVEN_TRIGGER_RR,
     SIGNAL_CONFIRMATIONS_REQUIRED,
     NO_NEW_ENTRY_AFTER,
+    TRADE_ENTRY_START_TIME,
+    LAST_TRADE_FORCE_EXIT_TIME,
+    TIME_EXIT_ENABLE,
+    MAX_HOLDING_MINUTES,
+    LTP_MAX_STALE_SECONDS,
 )
 
 
@@ -647,7 +652,23 @@ class TradingBot:
         paper_trade["RiskReward"] = trade.get("RiskReward", 0)
         paper_trade["Risk"] = trade.get("Risk", 0)
         paper_trade["OrderID"] = paper_trade.get("OrderID", "")
-        paper_trade["Timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        entry_now = datetime.now(ZoneInfo("Asia/Kolkata"))
+        paper_trade["EntryTime"] = entry_now.isoformat()
+        paper_trade["IsLastWindowTrade"] = (
+            entry_now.hour == 14 and entry_now.minute == 45
+        )
+        paper_trade["EventTimeline"] = [
+            {
+                "Time": entry_now.isoformat(),
+                "Event": "TRADE EXECUTED",
+                "Price": paper_trade.get("Entry"),
+            }
+        ]
+        # Backward-compatible fields for existing storage/history code.
+        paper_trade["Timestamp"] = entry_now.strftime("%Y-%m-%d %H:%M:%S")
+        paper_trade["Time"] = paper_trade.get("Time", paper_trade["Timestamp"])
+        paper_trade["LastKnownPrice"] = paper_trade.get("Entry")
+        paper_trade["LastLTPTime"] = entry_now.isoformat()
         paper_trade["PnL"] = ""
 
         # Open Position
@@ -680,38 +701,138 @@ class TradingBot:
         return paper_trade
 
     def get_live_premium(self, trade):
+        """Fetch live LTP and cache the last valid price.
+
+        Important: never fall back to Entry price. Entry can be far away from
+        the real market and can hide a stop-loss breach during a data outage.
+        Returns None when no fresh/recent reliable price is available.
         """
-        NEW METHOD.
-
-        Fetches the real current option premium for the open trade via
-        the active data provider's Kite LTP call. Replaces the old
-        market_simulator.simulate_price() random walk that
-        monitor_open_trade() used to rely on.
-
-        Falls back to the trade's own Entry price (a safe neutral
-        value that won't falsely trigger target/SL/break-even) if the
-        Symbol is missing or the LTP call fails transiently.
-        """
-
         symbol = trade.get("Symbol")
+        now = datetime.now(ZoneInfo("Asia/Kolkata"))
 
         if not symbol:
-            logger.warning(
-                "Trade has no Symbol stored - falling back to Entry "
-                "price for monitoring."
-            )
-            return trade["Entry"]
+            logger.error("Trade has no Symbol; cannot safely monitor LTP.")
+            return None
 
         try:
-            return self.data_provider.get_ltp(symbol)
+            price = self.data_provider.get_ltp(symbol)
+            if price is None or float(price) <= 0:
+                raise ValueError(f"Invalid LTP: {price}")
+
+            price = float(price)
+            trade["LastKnownPrice"] = price
+            trade["LastLTPTime"] = now.isoformat()
+            return price
 
         except Exception as e:
-            logger.error(
-                f"LTP fetch failed for {symbol}: {e}. "
-                f"Using last known Entry price as a safe fallback for "
-                f"this tick."
-            )
-            return trade["Entry"]
+            logger.error(f"LTP fetch failed for {symbol}: {e}")
+
+            cached_price = trade.get("LastKnownPrice")
+            cached_time = trade.get("LastLTPTime")
+            if cached_price is not None and cached_time:
+                try:
+                    age = (now - datetime.fromisoformat(cached_time)).total_seconds()
+                    if age <= LTP_MAX_STALE_SECONDS:
+                        logger.warning(
+                            f"Using cached LTP {cached_price} for {symbol}; "
+                            f"age={age:.1f}s"
+                        )
+                        return float(cached_price)
+                except Exception:
+                    pass
+
+            logger.error("No safe fresh/recent LTP available; skipping price decision.")
+            return None
+
+    def _entry_time_from_trade(self, trade):
+        """Return timezone-aware entry time for new and old trade records."""
+        ist = ZoneInfo("Asia/Kolkata")
+        value = trade.get("EntryTime") or trade.get("Timestamp") or trade.get("Time")
+        if not value:
+            raise ValueError("Open trade has no entry timestamp")
+
+        try:
+            entry_time = datetime.fromisoformat(str(value))
+        except ValueError:
+            entry_time = datetime.strptime(str(value), "%Y-%m-%d %H:%M:%S")
+
+        if entry_time.tzinfo is None:
+            entry_time = entry_time.replace(tzinfo=ist)
+        else:
+            entry_time = entry_time.astimezone(ist)
+        return entry_time
+
+    def _now_ist(self):
+        return datetime.now(ZoneInfo("Asia/Kolkata"))
+
+    def _event_time(self):
+        return self._now_ist().strftime("%Y-%m-%d %H:%M:%S IST")
+
+    def _add_trade_event(self, trade, event, **details):
+        record = {"Time": self._now_ist().isoformat(), "Event": event}
+        record.update(details)
+        trade.setdefault("EventTimeline", []).append(record)
+
+    def _print_trade_timeline(self, trade):
+        print("\n========== TRADE TIMELINE ==========")
+        for event in trade.get("EventTimeline", []):
+            try:
+                event_time = datetime.fromisoformat(event["Time"]).astimezone(
+                    ZoneInfo("Asia/Kolkata")
+                ).strftime("%H:%M:%S IST")
+            except Exception:
+                event_time = str(event.get("Time", ""))
+            print(f"{event_time} | {event.get('Event', '')}")
+        print("====================================")
+
+    def _print_exit_summary(
+        self,
+        trade,
+        close_result,
+        reason,
+        entry_time,
+        exit_time,
+        elapsed_minutes,
+        peak_price,
+    ):
+        """
+        NEW METHOD — unified exit summary, printed for EVERY exit path
+        (Target Hit, Stop Loss Hit, Time Exit, EOD Exit, Last-Trade-
+        Window Exit) so the console always shows the same complete
+        picture: signal/strike, entry premium, exit premium, the
+        Stop Loss level, Target, WHY it exited, entry/exit time,
+        how long it was held, the highest premium seen during the
+        hold, and the final P&L.
+        """
+
+        print("\n========== TRADE CLOSED ==========")
+        print(f"Reason          : {reason}")
+        print(f"Signal          : {trade.get('Signal', '')}")
+        print(
+            f"Strike          : {trade.get('Strike', '')} "
+            f"{trade.get('OptionType', '')}"
+        )
+        print(f"Entry Premium   : {trade['Entry']}")
+
+        if close_result:
+            print(f"Exit Premium    : {close_result['ExitPrice']}")
+        else:
+            print("Exit Premium    : (close failed - see error above)")
+
+        print(f"Stop Loss Level : {trade['StopLoss']}")
+        print(f"Target Level    : {trade['Target']}")
+        print(f"Peak Premium    : {peak_price} (highest LTP seen during hold)")
+        print(f"Entry Time      : {entry_time.strftime('%Y-%m-%d %H:%M:%S IST')}")
+        print(f"Exit Time       : {exit_time.strftime('%Y-%m-%d %H:%M:%S IST')}")
+        print(f"Holding Time    : {int(elapsed_minutes)} min")
+
+        if close_result:
+            print(f"Partial P&L     : {close_result.get('PartialPnL', 0)}")
+            print(f"Final P&L       : {close_result.get('FinalPnL', 0)}")
+            print(f"Total P&L       : {close_result['PnL']}")
+            print(f"Return          : {close_result['PnLPercent']} %")
+
+        print("===================================")
 
     def monitor_open_trade(self, trade):
         """
@@ -743,12 +864,144 @@ class TradingBot:
         """
 
         realized_pnl = 0.0
+        entry_time = self._entry_time_from_trade(trade)
 
-        print("\n========== TRADE MONITOR ==========")
+        # NEW: track the highest premium actually seen while the
+        # trade was open. Printed in every exit summary so you can
+        # see how much of a favorable move was given back by the
+        # time the trade actually closed (e.g. via Time-Exit or
+        # trailing stop), even though it's not possible to force an
+        # exit to land exactly ON that peak in real time -- by
+        # definition you only know a price was the peak once it has
+        # already passed (see chat explanation).
+        peak_price = trade["Entry"]
+
+        print("\n========== LIVE TRADE MONITOR ==========")
+        print(f"Entry Time      : {entry_time.strftime('%Y-%m-%d %H:%M:%S IST')}")
+        print(f"Entry Price     : {trade['Entry']}")
+        print(f"Initial SL      : {trade['StopLoss']}")
+        print(f"Target          : {trade['Target']}")
+        if trade.get("IsLastWindowTrade"):
+            print(f"Last Trade Rule : FORCE EXIT AT {LAST_TRADE_FORCE_EXIT_TIME} IST")
+        print("========================================")
 
         while self.position_manager.has_position():
 
+            now = datetime.now(ZoneInfo("Asia/Kolkata"))
+            elapsed_minutes = max(0.0, (now - entry_time).total_seconds() / 60.0)
             current_price = self.get_live_premium(trade)
+
+            if current_price is not None and current_price > peak_price:
+                peak_price = current_price
+
+            # ==========================================
+            # FIX: force-exit conditions (Last-Trade-Window,
+            # Time-based, EOD) must be checked EVEN WHEN live LTP is
+            # temporarily unavailable (e.g. after market hours, a
+            # brief API hiccup, or an expired/stale instrument).
+            #
+            # Previously, current_price == None caused an immediate
+            # `continue` BEFORE any of these three checks ran. Since
+            # Kite legitimately can't return a fresh LTP outside
+            # market hours, a trade left open past market close (or
+            # hit by any persistent LTP outage) would loop on
+            # `continue` forever -- none of Time-Exit, EOD-Exit, or
+            # Last-Trade-Exit could ever fire. Because this loop
+            # blocks run_continuously()'s outer scan loop until the
+            # position closes, a single stuck trade froze the ENTIRE
+            # bot indefinitely: it wouldn't self-exit, and — if this
+            # happened one day — it would still be stuck on that same
+            # trade the next day too, scanning nothing.
+            #
+            # Force-exits now use current_price when available, else
+            # fall back to the last known real price (or Entry if
+            # none yet) so a closing decision can still be made.
+            # ==========================================
+
+            exit_reference_price = (
+                current_price
+                if current_price is not None
+                else trade.get("LastKnownPrice", trade["Entry"])
+            )
+
+            # ==========================================
+            # LAST TRADE FORCE EXIT — 3:10 PM IST
+            # ==========================================
+            force_hour, force_minute = map(
+                int, LAST_TRADE_FORCE_EXIT_TIME.split(":")
+            )
+            if (
+                trade.get("IsLastWindowTrade", False)
+                and now.time() >= dt_time(force_hour, force_minute)
+            ):
+                self._add_trade_event(
+                    trade, "LAST TRADE FORCE EXIT", Price=exit_reference_price
+                )
+                print(
+                    f"\n[{self._event_time()}] "
+                    f"LAST TRADE FORCE EXIT @ {exit_reference_price:.2f}"
+                )
+                close_result = close_paper_trade(
+                    trade=trade,
+                    exit_price=exit_reference_price,
+                    exit_reason="LAST TRADE FORCE EXIT",
+                    realized_pnl=realized_pnl,
+                )
+                if close_result:
+                    save_trade_history({
+                        "Time": trade.get("EntryTime", trade.get("Timestamp", "")),
+                        "Signal": trade["Signal"],
+                        "Entry": trade["Entry"],
+                        "Exit": close_result["ExitPrice"],
+                        "StopLoss": trade["StopLoss"],
+                        "Target": trade["Target"],
+                        "Status": "CLOSED",
+                        "ExitReason": "LAST TRADE FORCE EXIT",
+                        "PnL": close_result["PnL"],
+                        "PnLPercent": close_result["PnLPercent"],
+                    })
+                self._print_exit_summary(
+                    trade, close_result, "LAST TRADE FORCE EXIT",
+                    entry_time, now, elapsed_minutes, peak_price,
+                )
+                self._print_trade_timeline(trade)
+                self.position_manager.close_position()
+                return
+
+            # ==========================================
+            # TIME-BASED FORCE EXIT
+            # ==========================================
+            if TIME_EXIT_ENABLE and elapsed_minutes >= MAX_HOLDING_MINUTES:
+
+                close_result = close_paper_trade(
+                    trade=trade,
+                    exit_price=exit_reference_price,
+                    exit_reason="TIME EXIT",
+                    realized_pnl=realized_pnl,
+                )
+
+                if close_result:
+                    save_trade_history({
+                        "Time": trade.get("EntryTime", trade.get("Timestamp", trade.get("Time", ""))),
+                        "Signal": trade["Signal"],
+                        "Entry": trade["Entry"],
+                        "Exit": close_result["ExitPrice"],
+                        "StopLoss": trade["StopLoss"],
+                        "Target": trade["Target"],
+                        "Status": "CLOSED",
+                        "ExitReason": "TIME EXIT",
+                        "PnL": close_result["PnL"],
+                        "PnLPercent": close_result["PnLPercent"],
+                    })
+
+                self.position_manager.close_position()
+                self._add_trade_event(trade, "TIME EXIT", Price=exit_reference_price)
+                self._print_exit_summary(
+                    trade, close_result, "TIME EXIT",
+                    entry_time, now, elapsed_minutes, peak_price,
+                )
+                self._print_trade_timeline(trade)
+                return
 
             # ==========================================
             # EOD FORCE EXIT
@@ -756,28 +1009,17 @@ class TradingBot:
 
             if is_eod_exit_time():
 
-                print("\n=================================")
-                print("      EOD FORCE EXIT")
-                print("=================================")
-
                 close_result = close_paper_trade(
                     trade=trade,
-                    exit_price=current_price,
+                    exit_price=exit_reference_price,
                     exit_reason="EOD EXIT",
                     realized_pnl=realized_pnl,
                 )
 
                 if close_result:
 
-                    print(f"Entry : {trade['Entry']}")
-                    print(f"Exit  : {close_result['ExitPrice']}")
-                    print(f"Partial P&L : {close_result.get('PartialPnL', 0)}")
-                    print(f"Final P&L   : {close_result.get('FinalPnL', 0)}")
-                    print(f"Total P&L   : {close_result['PnL']}")
-                    print(f"Return      : {close_result['PnLPercent']} %")
-
                     save_trade_history({
-                        "Time": trade["Time"],
+                        "Time": trade.get("EntryTime", trade.get("Timestamp", trade.get("Time", ""))),
                         "Signal": trade["Signal"],
                         "Entry": trade["Entry"],
                         "Exit": close_result["ExitPrice"],
@@ -790,9 +1032,26 @@ class TradingBot:
 
                 self.position_manager.close_position()
 
-                print("EOD Position Closed Successfully.")
+                self._add_trade_event(trade, "EOD EXIT", Price=exit_reference_price)
+                self._print_exit_summary(
+                    trade, close_result, "EOD EXIT",
+                    entry_time, now, elapsed_minutes, peak_price,
+                )
+                self._print_trade_timeline(trade)
 
                 return
+
+            # ==========================================
+            # LIVE PRICE UNAVAILABLE — nothing further to evaluate
+            # this tick (break-even/trailing/target/SL all need a
+            # fresh real price; force-exits above already handled
+            # the case where we must close anyway).
+            # ==========================================
+            if current_price is None:
+                print("Live LTP unavailable - no SL/target decision this tick.")
+                print(f"Holding Time : {elapsed_minutes:.2f} min")
+                time.sleep(TRADE_MONITOR_INTERVAL)
+                continue
 
             # ==========================================
             # BREAK EVEN PROTECTION
@@ -826,6 +1085,14 @@ class TradingBot:
             )
 
             if trade["StopLoss"] != old_sl:
+                self._add_trade_event(
+                    trade, "STOP LOSS UPDATED", OldSL=old_sl,
+                    NewSL=trade["StopLoss"]
+                )
+                print(
+                    f"[{self._event_time()}] SL UPDATED | "
+                    f"{old_sl} -> {trade['StopLoss']}"
+                )
                 logger.debug(
                     f"Break Even / Trailing SL Updated: "
                     f"{old_sl} -> {trade['StopLoss']}"
@@ -835,13 +1102,15 @@ class TradingBot:
             # DISPLAY TRADE STATUS
             # ==========================================
 
-            print("\n----------------------------")
-            print(f"Entry         : {trade['Entry']}")
-            print(f"Current Price : {round(current_price, 2)}")
-            print(f"Stop Loss     : {trade['StopLoss']}")
-            print(f"Target        : {trade['Target']}")
-            print(f"Quantity      : {trade['Quantity']}")
-            print(f"Realized P&L  : {round(realized_pnl, 2)}")
+            live_pnl = (current_price - trade["Entry"]) * trade["Quantity"]
+            print(
+                f"[{now.strftime('%H:%M:%S IST')}] "
+                f"LTP={current_price:.2f} | "
+                f"PnL={live_pnl + realized_pnl:.2f} | "
+                f"SL={trade['StopLoss']:.2f} | "
+                f"TARGET={trade['Target']:.2f} | "
+                f"HOLD={int(elapsed_minutes)}m"
+            )
 
             # ==========================================
             # PARTIAL PROFIT BOOKING
@@ -872,6 +1141,10 @@ class TradingBot:
                 )
 
                 realized_pnl += partial_pnl
+                self._add_trade_event(
+                    trade, "PARTIAL PROFIT BOOKED", Price=current_price
+                )
+                print(f"[{self._event_time()}] PARTIAL PROFIT BOOKED")
 
                 print("\n=================================")
                 print("      PARTIAL PROFIT BOOKING")
@@ -901,7 +1174,7 @@ class TradingBot:
 
             if trade_status == "TARGET HIT":
 
-                print("\n[TARGET HIT] Target Achieved!")
+                self._add_trade_event(trade, "TARGET HIT", Price=current_price)
 
                 close_result = close_paper_trade(
                     trade=trade,
@@ -911,18 +1184,8 @@ class TradingBot:
                 )
 
                 if close_result:
-
-                    print("\n========== TARGET RESULT ==========")
-                    print(f"Entry Price     : {trade['Entry']}")
-                    print(f"Exit Price      : {close_result['ExitPrice']}")
-                    print(f"Partial P&L     : {close_result.get('PartialPnL', 0)}")
-                    print(f"Final P&L       : {close_result.get('FinalPnL', 0)}")
-                    print(f"Total P&L       : {close_result['PnL']}")
-                    print(f"Return          : {close_result['PnLPercent']} %")
-                    print("===================================")
-
                     save_trade_history({
-                        "Time": trade["Time"],
+                        "Time": trade.get("EntryTime", trade.get("Timestamp", trade.get("Time", ""))),
                         "Signal": trade["Signal"],
                         "Entry": trade["Entry"],
                         "Exit": close_result["ExitPrice"],
@@ -935,13 +1198,17 @@ class TradingBot:
 
                 self.position_manager.close_position()
 
-                print("Target Position Closed Successfully.")
+                self._print_exit_summary(
+                    trade, close_result, "TARGET HIT",
+                    entry_time, now, elapsed_minutes, peak_price,
+                )
+                self._print_trade_timeline(trade)
 
                 return
 
             if trade_status == "STOP LOSS HIT":
 
-                print("\n[STOP LOSS] Stop Loss Triggered!")
+                self._add_trade_event(trade, "STOP LOSS HIT", Price=current_price)
 
                 close_result = close_paper_trade(
                     trade=trade,
@@ -951,18 +1218,8 @@ class TradingBot:
                 )
 
                 if close_result:
-
-                    print("\n========== STOP LOSS RESULT ==========")
-                    print(f"Entry Price     : {trade['Entry']}")
-                    print(f"Exit Price      : {close_result['ExitPrice']}")
-                    print(f"Partial P&L     : {close_result.get('PartialPnL', 0)}")
-                    print(f"Final P&L       : {close_result.get('FinalPnL', 0)}")
-                    print(f"Total P&L       : {close_result['PnL']}")
-                    print(f"Return          : {close_result['PnLPercent']} %")
-                    print("======================================")
-
                     save_trade_history({
-                        "Time": trade["Time"],
+                        "Time": trade.get("EntryTime", trade.get("Timestamp", trade.get("Time", ""))),
                         "Signal": trade["Signal"],
                         "Entry": trade["Entry"],
                         "Exit": close_result["ExitPrice"],
@@ -975,23 +1232,22 @@ class TradingBot:
 
                 self.position_manager.close_position()
 
-                print("Stop Loss Position Closed Successfully.")
+                self._print_exit_summary(
+                    trade, close_result, "STOP LOSS HIT",
+                    entry_time, now, elapsed_minutes, peak_price,
+                )
+                self._print_trade_timeline(trade)
 
                 return
 
             # ==========================================
             # TRADE STILL OPEN
             # ==========================================
-
-            print("\nTrade Status : OPEN")
-
-            pnl_status = get_trade_status(
-                entry_price=trade["Entry"],
-                current_price=current_price,
-                quantity=trade["Quantity"]
-            )
-
-            print(f"P&L : {pnl_status}")
+            # NOTE: status for this tick is already printed above (the
+            # single "[HH:MM:SS IST] LTP=... | PnL=... | SL=... |
+            # TARGET=... | HOLD=...m" line) — removed the old
+            # redundant multi-line "Trade Status : OPEN" + dict print
+            # that used to follow it, so each tick is exactly one line.
 
             time.sleep(TRADE_MONITOR_INTERVAL)
 
@@ -1224,25 +1480,42 @@ class TradingBot:
     def run(self):
 
         # ==========================================
-        # ENTRY CUTOFF — no fresh trades too close to close
+        # NEW TRADE ENTRY WINDOW — 09:30 to 14:45 IST
         # ==========================================
-
         ist = ZoneInfo("Asia/Kolkata")
-        now_time = datetime.now(ist).time()
+        now = datetime.now(ist)
+        now_time = now.time()
 
+        start_hour, start_minute = map(
+            int, TRADE_ENTRY_START_TIME.split(":")
+        )
         cutoff_hour, cutoff_minute = map(
             int, NO_NEW_ENTRY_AFTER.split(":")
         )
-        cutoff_time = dt_time(cutoff_hour, cutoff_minute)
 
-        if now_time >= cutoff_time:
+        entry_start_time = dt_time(start_hour, start_minute)
+        entry_cutoff_end = dt_time(
+            cutoff_hour, cutoff_minute, 59, 999999
+        )
 
+        print("\n========== ENTRY WINDOW ==========")
+        print(f"Current Time : {now.strftime('%H:%M:%S IST')}")
+        print(f"Allowed From : {TRADE_ENTRY_START_TIME} IST")
+        print(f"Last Entry   : {NO_NEW_ENTRY_AFTER} IST")
+        print("==================================")
+
+        if now_time < entry_start_time:
             print(
-                f"\nToo close to market close "
-                f"(after {NO_NEW_ENTRY_AFTER} IST) — "
-                f"no fresh entries taken this cycle."
+                f"[ENTRY BLOCKED] New trades start at "
+                f"{TRADE_ENTRY_START_TIME} IST."
             )
+            return
 
+        if now_time > entry_cutoff_end:
+            print(
+                f"[ENTRY BLOCKED] Entry window closed after "
+                f"{NO_NEW_ENTRY_AFTER} IST."
+            )
             return
 
         show_features()

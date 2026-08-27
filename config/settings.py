@@ -3,6 +3,29 @@ BOT_NAME = "Option Buying Bot"
 VERSION = "1.0"
 PAPER_TRADING = True
 
+# ===============================
+# TRADE ENTRY WINDOW
+# ===============================
+
+TRADE_ENTRY_START_TIME = "09:30"
+NO_NEW_ENTRY_AFTER = "14:45"
+
+# ===============================
+# LAST TRADE FORCE EXIT
+# ===============================
+# FIX (dedup): this used to be defined twice in this file (once near
+# the top, once near the bottom) with identical values - harmless but
+# confusing. Now defined once.
+#
+# This is also the single source of truth for end-of-day exit time -
+# paper_trade.py's is_eod_exit_time() now reads this value instead of
+# its own separate hardcoded 15:20, so there's only one EOD cutoff in
+# the whole system instead of two different ones (15:10 here vs 15:20
+# there) that could silently disagree.
+
+LAST_ENTRY_WINDOW_START_TIME = "14:45"
+LAST_TRADE_FORCE_EXIT_TIME = "15:10"
+
 ATR_MULTIPLIER = 1.0
 RISK_REWARD = 2
 
@@ -54,18 +77,24 @@ EMA_TREND_GAP = 8       # was 15 (this constant wasn't even being used by
 TRADE_MONITOR_INTERVAL = 1
 
 # ===============================
-# NEW: Entry Cutoff Time
+# TIME BASED EXIT
 # ===============================
-# Prevents the bot from taking a FRESH trade too close to market
-# close. Without this, a signal firing at e.g. 3:25 PM could open a
-# brand new position with almost no time to develop before the
-# EOD force-exit at 3:20 PM logic in monitor_open_trade() closes it
-# again almost immediately.
-#
-# This only blocks NEW entries — it has no effect on managing/closing
-# a trade that's already open (that's handled separately by the EOD
-# force-exit check).
-NO_NEW_ENTRY_AFTER = "14:45"
+# Force-closes an open trade after MAX_HOLDING_MINUTES regardless of
+# Target/StopLoss, to cap theta-decay exposure on positions that
+# aren't moving favorably.
+
+TIME_EXIT_ENABLE = True
+MAX_HOLDING_MINUTES = 45
+
+# ===============================
+# LIVE PRICE FALLBACK
+# ===============================
+# How many seconds a cached LTP is trusted for if a fresh live fetch
+# fails. Beyond this, get_live_premium() returns None for that tick
+# (force-exit checks still run using the last known price - see the
+# FIX comment in bot.py's monitor_open_trade()).
+
+LTP_MAX_STALE_SECONDS = 10
 
 # ===============================
 # NEW: Signal Confluence

@@ -132,6 +132,35 @@ def analyze_cycle(cycle_text):
     return result
 
 
+def read_log_file(path):
+    """
+    FIX: PowerShell's Tee-Object writes files in UTF-16 encoding by
+    default on Windows PowerShell 5.1 (not UTF-8). Assuming UTF-8
+    unconditionally silently produced garbled/empty-looking content
+    (via errors="ignore"), so "Running Trading Cycle..." never
+    matched anything and every count came back 0.
+
+    Tries several encodings and picks whichever one actually contains
+    our marker text.
+    """
+
+    for enc in ("utf-8-sig", "utf-16", "utf-8", "cp1252", "latin-1"):
+
+        try:
+            with open(path, "r", encoding=enc) as f:
+                content = f.read()
+        except (UnicodeError, UnicodeDecodeError):
+            continue
+
+        if "Running Trading Cycle" in content:
+            return content
+
+    # Last resort: return whatever utf-8 (lossy) gives, so the script
+    # doesn't crash outright even if nothing matched above.
+    with open(path, "r", encoding="utf-8", errors="ignore") as f:
+        return f.read()
+
+
 def main():
 
     if len(sys.argv) < 2:
@@ -140,8 +169,7 @@ def main():
 
     log_path = sys.argv[1]
 
-    with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
-        text = f.read()
+    text = read_log_file(log_path)
 
     cycles = split_into_cycles(text)
 

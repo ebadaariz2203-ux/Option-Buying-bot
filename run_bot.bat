@@ -24,6 +24,10 @@ REM Run via an inline PowerShell -Command (not a .ps1 script file),
 REM which is NOT subject to the script-file execution policy
 REM restriction that blocks .ps1 files. Sets UTF-8 codepage and
 REM captures the full session with Tee-Object in one go.
+REM NOTE: Tee-Object writes UTF-16 by default on Windows PowerShell 5.1
+REM (the -Encoding parameter isn't supported on this version, so we
+REM don't force UTF-8 here). This is fine -- post_market_audit.py
+REM auto-detects the file's encoding when reading it.
 powershell -NoProfile -ExecutionPolicy Bypass -Command "chcp 65001 | Out-Null; python main.py 2>&1 | Tee-Object -FilePath '%LOGFILE%'"
 
 echo.
