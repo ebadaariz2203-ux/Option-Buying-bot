@@ -28,4 +28,8 @@ Write-Host "Session will be saved to: $logFile"
 Write-Host ""
 
 # Run the bot, capturing all output (console + file) at once
-python main.py 2>&1 | Tee-Object -FilePath $logFile
+# -u disables Python's stdout/stderr buffering: without it, piping through
+# Tee-Object switches Python to block-buffered mode, so nothing appears in
+# the console (or the log file) until the buffer fills or the process exits
+# -- which for a long-running bot loop can mean no output at all.
+python -u main.py 2>&1 | Tee-Object -FilePath $logFile

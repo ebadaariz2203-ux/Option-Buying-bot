@@ -145,7 +145,7 @@ from trade_history.trade_history import save_trade_history
 # PORTFOLIO
 # ============================================================
 
-from portfolio.portfolio_manager import portfolio_summary
+from portfolio.portfolio_manager import portfolio_summary, unlock_capital
 
 
 # ============================================================
@@ -163,10 +163,24 @@ from pricing.dynamic_option_price import DynamicOptionPricing
 
 
 # ============================================================
+# EXECUTION (SLIPPAGE / CHARGES)
+# ============================================================
+# FIX: this cost-model engine existed in the repo but had zero callers
+# anywhere -- every reported P&L (console, CSVs, Telegram) was the raw
+# premium delta with no brokerage/STT/GST/slippage deducted, making
+# paper-trading look more profitable than live trading would actually
+# be. Now applied to the partial-exit leg here and to the final-close
+# leg in paper_trade.close_paper_trade().
+
+from execution.slippage import apply_slippage
+from execution.charges import calculate_charges
+
+
+# ============================================================
 # ANALYTICS
 # ============================================================
 
-from analytics.performance import calculate_performance
+from analytics.performance import calculate_performance, calculate_daily_summary
 from analytics.equity_curve import calculate_equity_curve
 
 
@@ -317,6 +331,8 @@ class TradingBot:
                     print("\nMarket Closed.")
                     print("Trading Bot Stopped for Today.")
 
+                    self.show_market_close_summary()
+
                     break
 
                 # =================================
@@ -406,6 +422,17 @@ class TradingBot:
         close_price = float(data.iloc[-1]["Close"])
 
         option = self.data_provider.get_option_chain(close_price)
+
+        # FIX: get_option_chain() catches its own internal exceptions
+        # (rate limiting, cookie expiry, schema change) and returns
+        # None on failure. Subscripting it unconditionally below used
+        # to raise an unhandled TypeError that masked the real error
+        # and crashed the trading cycle instead of just skipping it.
+        if option is None:
+            print("\nOption Chain Unavailable")
+            print("Trade Skipped")
+            return "NO TRADE", None
+
         print("\n========== AVAILABLE STRIKES ==========")
 
         for strike in option["Strikes"]:
@@ -461,10 +488,18 @@ class TradingBot:
         # CHOPPY market is always a hard block -- a genuinely flat/
         # directionless market shouldn't be traded regardless of other
         # confirmations passing.
+        #
+        # FIX (2026-08-31 loss review): TREND EXHAUSTION (very high ADX,
+        # non-expanding ATR) is blocked the same way. That trade passed
+        # confluence 2/2 (Strong Trend + HTF Confirmed both look only at
+        # EMA gap / trend direction, not ADX/ATR) despite the regime
+        # engine already flagging the setup as stalled, then whipsawed
+        # for the full 45-minute hold and closed at -131.22 on the time
+        # exit. See config/settings.py's ADX_EXHAUSTION_THRESHOLD comment.
         # ===============================
-        if market_regime == "CHOPPY":
+        if market_regime in ("CHOPPY", "TREND EXHAUSTION"):
 
-            print("\nMarket is Choppy")
+            print(f"\nMarket is {market_regime.title()}")
             print("Trade Skipped")
 
             return "NO TRADE", None
@@ -476,19 +511,30 @@ class TradingBot:
         # a 5-6 stage AND-chain that was almost impossible to pass
         # together, causing zero trades across multiple sessions.
         #
-        # These two are now scored: SIGNAL_CONFIRMATIONS_REQUIRED (in
-        # config/settings.py) controls how many of the 2 must pass.
-        # Default = 2 (both required) preserves the exact old strict
-        # behaviour. Set it to 1 in settings.py if logs show this pair
-        # is what's most often blocking trades.
+        # These are now scored: SIGNAL_CONFIRMATIONS_REQUIRED (in
+        # config/settings.py) controls how many of the 3 must pass.
+        # Default = 2 (was 2 of 2 before atr_expanding was added below
+        # on 2026-08-31 -- see settings.py comment for the net effect).
+        # Set it to 1 in settings.py if logs show these are what's most
+        # often blocking trades, or to 3 for the old strict AND.
+        #
+        # FIX (2026-08-31 loss review): added atr_expanding as a 3rd
+        # scored vote -- a real volatility expansion is itself evidence
+        # the move is genuine, so it can now stand in for strong_trend
+        # or htf_confirmed when only one of those two holds. This is
+        # additive only (anything that passed 2-of-2 before still
+        # passes); it does NOT reopen today's ADX=72.45/flat-ATR trade,
+        # which is blocked earlier by the TREND EXHAUSTION regime check
+        # above regardless of this score.
         # ===============================
 
-        confirmations_passed = sum([strong_trend, htf_confirmed])
+        confirmations_passed = sum([strong_trend, htf_confirmed, atr_expanding])
 
         print("\n========== CONFLUENCE CHECK ==========")
         print(f"Strong Trend    : {strong_trend}")
         print(f"HTF Confirmed   : {htf_confirmed}")
-        print(f"Passed          : {confirmations_passed} / 2")
+        print(f"ATR Expanding   : {atr_expanding}")
+        print(f"Passed          : {confirmations_passed} / 3")
         print(f"Required        : {SIGNAL_CONFIRMATIONS_REQUIRED}")
         print("=======================================")
 
@@ -934,9 +980,6 @@ class TradingBot:
                 trade.get("IsLastWindowTrade", False)
                 and now.time() >= dt_time(force_hour, force_minute)
             ):
-                self._add_trade_event(
-                    trade, "LAST TRADE FORCE EXIT", Price=exit_reference_price
-                )
                 print(
                     f"\n[{self._event_time()}] "
                     f"LAST TRADE FORCE EXIT @ {exit_reference_price:.2f}"
@@ -947,25 +990,48 @@ class TradingBot:
                     exit_reason="LAST TRADE FORCE EXIT",
                     realized_pnl=realized_pnl,
                 )
-                if close_result:
-                    save_trade_history({
-                        "Time": trade.get("EntryTime", trade.get("Timestamp", "")),
-                        "Signal": trade["Signal"],
-                        "Entry": trade["Entry"],
-                        "Exit": close_result["ExitPrice"],
-                        "StopLoss": trade["StopLoss"],
-                        "Target": trade["Target"],
-                        "Status": "CLOSED",
-                        "ExitReason": "LAST TRADE FORCE EXIT",
-                        "PnL": close_result["PnL"],
-                        "PnLPercent": close_result["PnLPercent"],
-                    })
+
+                # FIX: close_position() used to be called unconditionally
+                # here even when close_paper_trade() failed (returned
+                # None) -- silently marking a still-open trade as closed
+                # in memory while open_positions.csv still had it open
+                # and its capital was never unlocked. Now a failed close
+                # is logged and retried next tick instead of being
+                # dropped on the floor.
+                if close_result is None:
+                    logger.critical(
+                        "[CLOSE FAILED] LAST TRADE FORCE EXIT could not "
+                        "close the trade — position remains OPEN and "
+                        "will be retried next tick."
+                    )
+                    print(
+                        f"[{self._event_time()}] CLOSE FAILED — "
+                        "will retry closing this trade."
+                    )
+                    time.sleep(TRADE_MONITOR_INTERVAL)
+                    continue
+
+                self._add_trade_event(
+                    trade, "LAST TRADE FORCE EXIT", Price=exit_reference_price
+                )
+                save_trade_history({
+                    "Time": trade.get("EntryTime", trade.get("Timestamp", "")),
+                    "Signal": trade["Signal"],
+                    "Entry": trade["Entry"],
+                    "Exit": close_result["ExitPrice"],
+                    "StopLoss": trade["StopLoss"],
+                    "Target": trade["Target"],
+                    "Status": "CLOSED",
+                    "ExitReason": "LAST TRADE FORCE EXIT",
+                    "PnL": close_result["PnL"],
+                    "PnLPercent": close_result["PnLPercent"],
+                })
+                self.position_manager.close_position()
                 self._print_exit_summary(
                     trade, close_result, "LAST TRADE FORCE EXIT",
                     entry_time, now, elapsed_minutes, peak_price,
                 )
                 self._print_trade_timeline(trade)
-                self.position_manager.close_position()
                 return
 
             # ==========================================
@@ -980,19 +1046,33 @@ class TradingBot:
                     realized_pnl=realized_pnl,
                 )
 
-                if close_result:
-                    save_trade_history({
-                        "Time": trade.get("EntryTime", trade.get("Timestamp", trade.get("Time", ""))),
-                        "Signal": trade["Signal"],
-                        "Entry": trade["Entry"],
-                        "Exit": close_result["ExitPrice"],
-                        "StopLoss": trade["StopLoss"],
-                        "Target": trade["Target"],
-                        "Status": "CLOSED",
-                        "ExitReason": "TIME EXIT",
-                        "PnL": close_result["PnL"],
-                        "PnLPercent": close_result["PnLPercent"],
-                    })
+                # FIX: see LAST TRADE FORCE EXIT above -- don't mark the
+                # position closed if close_paper_trade() actually failed.
+                if close_result is None:
+                    logger.critical(
+                        "[CLOSE FAILED] TIME EXIT could not close the "
+                        "trade — position remains OPEN and will be "
+                        "retried next tick."
+                    )
+                    print(
+                        f"[{self._event_time()}] CLOSE FAILED — "
+                        "will retry closing this trade."
+                    )
+                    time.sleep(TRADE_MONITOR_INTERVAL)
+                    continue
+
+                save_trade_history({
+                    "Time": trade.get("EntryTime", trade.get("Timestamp", trade.get("Time", ""))),
+                    "Signal": trade["Signal"],
+                    "Entry": trade["Entry"],
+                    "Exit": close_result["ExitPrice"],
+                    "StopLoss": trade["StopLoss"],
+                    "Target": trade["Target"],
+                    "Status": "CLOSED",
+                    "ExitReason": "TIME EXIT",
+                    "PnL": close_result["PnL"],
+                    "PnLPercent": close_result["PnLPercent"],
+                })
 
                 self.position_manager.close_position()
                 self._add_trade_event(trade, "TIME EXIT", Price=exit_reference_price)
@@ -1016,19 +1096,32 @@ class TradingBot:
                     realized_pnl=realized_pnl,
                 )
 
-                if close_result:
+                # FIX: see LAST TRADE FORCE EXIT above -- don't mark the
+                # position closed if close_paper_trade() actually failed.
+                if close_result is None:
+                    logger.critical(
+                        "[CLOSE FAILED] EOD EXIT could not close the "
+                        "trade — position remains OPEN and will be "
+                        "retried next tick."
+                    )
+                    print(
+                        f"[{self._event_time()}] CLOSE FAILED — "
+                        "will retry closing this trade."
+                    )
+                    time.sleep(TRADE_MONITOR_INTERVAL)
+                    continue
 
-                    save_trade_history({
-                        "Time": trade.get("EntryTime", trade.get("Timestamp", trade.get("Time", ""))),
-                        "Signal": trade["Signal"],
-                        "Entry": trade["Entry"],
-                        "Exit": close_result["ExitPrice"],
-                        "StopLoss": trade["StopLoss"],
-                        "Target": trade["Target"],
-                        "Status": "CLOSED",
-                        "PnL": close_result["PnL"],
-                        "PnLPercent": close_result["PnLPercent"],
-                    })
+                save_trade_history({
+                    "Time": trade.get("EntryTime", trade.get("Timestamp", trade.get("Time", ""))),
+                    "Signal": trade["Signal"],
+                    "Entry": trade["Entry"],
+                    "Exit": close_result["ExitPrice"],
+                    "StopLoss": trade["StopLoss"],
+                    "Target": trade["Target"],
+                    "Status": "CLOSED",
+                    "PnL": close_result["PnL"],
+                    "PnLPercent": close_result["PnLPercent"],
+                })
 
                 self.position_manager.close_position()
 
@@ -1135,8 +1228,24 @@ class TradingBot:
                     trade["Quantity"]
                 )
 
+                # FIX: unlock the capital that was locked (at entry
+                # price) for the slice of the position being exited
+                # here. Previously only the FINAL remaining quantity's
+                # capital was ever unlocked (in close_paper_trade()),
+                # so every partial exit permanently shrank available
+                # balance even though this much capital was no longer
+                # at risk -- eventually causing valid new trades to be
+                # rejected with "Insufficient Balance".
+                unlock_capital(trade["Entry"] * exit_qty)
+
+                actual_exit_price = apply_slippage(current_price, "SELL")
+                charges = calculate_charges(
+                    trade["Entry"], actual_exit_price, exit_qty
+                )
+
                 partial_pnl = round(
-                    (current_price - trade["Entry"]) * exit_qty,
+                    (actual_exit_price - trade["Entry"]) * exit_qty
+                    - charges["TotalCharges"],
                     2
                 )
 
@@ -1151,9 +1260,10 @@ class TradingBot:
                 print("=================================")
 
                 print(f"Entry Price        : {trade['Entry']}")
-                print(f"Partial Exit Price : {current_price}")
+                print(f"Partial Exit Price : {current_price} (fill: {actual_exit_price})")
                 print(f"Exit Quantity      : {exit_qty}")
                 print(f"Remaining Quantity : {remaining_qty}")
+                print(f"Charges            : {charges['TotalCharges']}")
                 print(f"Partial P&L        : {partial_pnl}")
                 print(f"Realized P&L       : {realized_pnl}")
 
@@ -1174,8 +1284,6 @@ class TradingBot:
 
             if trade_status == "TARGET HIT":
 
-                self._add_trade_event(trade, "TARGET HIT", Price=current_price)
-
                 close_result = close_paper_trade(
                     trade=trade,
                     exit_price=current_price,
@@ -1183,18 +1291,33 @@ class TradingBot:
                     realized_pnl=realized_pnl,
                 )
 
-                if close_result:
-                    save_trade_history({
-                        "Time": trade.get("EntryTime", trade.get("Timestamp", trade.get("Time", ""))),
-                        "Signal": trade["Signal"],
-                        "Entry": trade["Entry"],
-                        "Exit": close_result["ExitPrice"],
-                        "StopLoss": trade["StopLoss"],
-                        "Target": trade["Target"],
-                        "Status": "CLOSED",
-                        "PnL": close_result["PnL"],
-                        "PnLPercent": close_result["PnLPercent"],
-                    })
+                # FIX: see LAST TRADE FORCE EXIT above -- don't mark the
+                # position closed if close_paper_trade() actually failed.
+                if close_result is None:
+                    logger.critical(
+                        "[CLOSE FAILED] TARGET HIT could not close the "
+                        "trade — position remains OPEN and will be "
+                        "retried next tick."
+                    )
+                    print(
+                        f"[{self._event_time()}] CLOSE FAILED — "
+                        "will retry closing this trade."
+                    )
+                    time.sleep(TRADE_MONITOR_INTERVAL)
+                    continue
+
+                self._add_trade_event(trade, "TARGET HIT", Price=current_price)
+                save_trade_history({
+                    "Time": trade.get("EntryTime", trade.get("Timestamp", trade.get("Time", ""))),
+                    "Signal": trade["Signal"],
+                    "Entry": trade["Entry"],
+                    "Exit": close_result["ExitPrice"],
+                    "StopLoss": trade["StopLoss"],
+                    "Target": trade["Target"],
+                    "Status": "CLOSED",
+                    "PnL": close_result["PnL"],
+                    "PnLPercent": close_result["PnLPercent"],
+                })
 
                 self.position_manager.close_position()
 
@@ -1208,8 +1331,6 @@ class TradingBot:
 
             if trade_status == "STOP LOSS HIT":
 
-                self._add_trade_event(trade, "STOP LOSS HIT", Price=current_price)
-
                 close_result = close_paper_trade(
                     trade=trade,
                     exit_price=current_price,
@@ -1217,18 +1338,33 @@ class TradingBot:
                     realized_pnl=realized_pnl,
                 )
 
-                if close_result:
-                    save_trade_history({
-                        "Time": trade.get("EntryTime", trade.get("Timestamp", trade.get("Time", ""))),
-                        "Signal": trade["Signal"],
-                        "Entry": trade["Entry"],
-                        "Exit": close_result["ExitPrice"],
-                        "StopLoss": trade["StopLoss"],
-                        "Target": trade["Target"],
-                        "Status": "CLOSED",
-                        "PnL": close_result["PnL"],
-                        "PnLPercent": close_result["PnLPercent"],
-                    })
+                # FIX: see LAST TRADE FORCE EXIT above -- don't mark the
+                # position closed if close_paper_trade() actually failed.
+                if close_result is None:
+                    logger.critical(
+                        "[CLOSE FAILED] STOP LOSS HIT could not close "
+                        "the trade — position remains OPEN and will be "
+                        "retried next tick."
+                    )
+                    print(
+                        f"[{self._event_time()}] CLOSE FAILED — "
+                        "will retry closing this trade."
+                    )
+                    time.sleep(TRADE_MONITOR_INTERVAL)
+                    continue
+
+                self._add_trade_event(trade, "STOP LOSS HIT", Price=current_price)
+                save_trade_history({
+                    "Time": trade.get("EntryTime", trade.get("Timestamp", trade.get("Time", ""))),
+                    "Signal": trade["Signal"],
+                    "Entry": trade["Entry"],
+                    "Exit": close_result["ExitPrice"],
+                    "StopLoss": trade["StopLoss"],
+                    "Target": trade["Target"],
+                    "Status": "CLOSED",
+                    "PnL": close_result["PnL"],
+                    "PnLPercent": close_result["PnLPercent"],
+                })
 
                 self.position_manager.close_position()
 
@@ -1418,6 +1554,62 @@ class TradingBot:
         print(f"Expectancy     : {performance['Expectancy']}")
         print(f"Sharpe Ratio   : {performance['SharpeRatio']}")
         print("==================================")
+
+    def show_daily_summary(self):
+        """
+        Trades placed TODAY only (IST calendar date), scoped from
+        completed_trade_history.csv's Date column. Printed at market
+        close, in addition to show_performance()'s all-time numbers,
+        so the console shows "what happened today" separately from
+        "how the bot has done overall".
+        """
+
+        daily = calculate_daily_summary()
+
+        print("\n========== DAILY TRADE SUMMARY ==========")
+        print(f"Date            : {daily['Date']}")
+        print(f"Total Trades    : {daily['TotalTrades']}")
+
+        if daily["TotalTrades"] == 0:
+            print("No trades were taken today.")
+            print("===========================================")
+            return daily
+
+        print(f"  Call Trades   : {daily['CallTrades']}")
+        print(f"  Put Trades    : {daily['PutTrades']}")
+        print(f"Winning Trades  : {daily['WinningTrades']}")
+        print(f"Losing Trades   : {daily['LosingTrades']}")
+        print(f"Win Rate        : {daily['WinRate']} %")
+        print(f"Total P&L       : {daily['TotalPnL']}")
+        print(f"Avg Profit      : {daily['AverageProfit']}")
+        print(f"Avg Loss        : {daily['AverageLoss']}")
+        print(f"Best Trade      : {daily['BestTrade']}")
+        print(f"Worst Trade     : {daily['WorstTrade']}")
+        print(f"Max Drawdown    : {daily['MaxDrawdown']}")
+        print(f"Profit Factor   : {daily['ProfitFactor']}")
+        print(f"Expectancy      : {daily['Expectancy']}")
+        print("===========================================")
+
+        return daily
+
+    def show_market_close_summary(self):
+        """
+        Called once, when check_market_session() first reports the
+        market closed for the day (run_continuously()'s exit path).
+        Prints today's trades (show_daily_summary) followed by the
+        all-time/final tally (show_performance) so both numbers are
+        visible together at end of day, not just after whichever
+        trade happened to close last.
+        """
+
+        print("\n########## END OF DAY REPORT ##########")
+
+        self.show_daily_summary()
+
+        print("\n========== FINAL TRADE SUMMARY (ALL-TIME) ==========")
+        self.show_performance()
+
+        print("########################################\n")
 
     def show_equity_curve(self):
 

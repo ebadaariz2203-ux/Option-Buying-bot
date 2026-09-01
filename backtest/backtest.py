@@ -57,6 +57,30 @@ def run_backtest(data):
 
             trade = calculate_trade(entry, atr)
 
+            # FIX: calculate_trade() always returns StopLoss below
+            # Entry and Target above Entry (correct for BUY CALL, where
+            # a rising index = profit). For BUY PUT, backtest.py treats
+            # trade["Entry"] as the raw index price and compares it
+            # directly against future index highs/lows, so those same
+            # CALL-shaped levels made simulate_trade's PUT branch check
+            # `low <= target` against a target ABOVE entry -- true on
+            # almost every candle -- producing a near-guaranteed WIN
+            # regardless of actual price action. Mirror the levels
+            # around Entry for PUT so Target sits below and StopLoss
+            # sits above, matching what simulate_trade's PUT branch
+            # (which trails the stop down toward `high - atr`) already
+            # assumes.
+            if signal == "BUY PUT":
+                risk_amount = round(trade["Entry"] - trade["StopLoss"], 2)
+                reward_amount = round(trade["Target"] - trade["Entry"], 2)
+                trade["StopLoss"] = round(trade["Entry"] + risk_amount, 2)
+                trade["Target"] = round(trade["Entry"] - reward_amount, 2)
+
+            # Direction multiplier so raw index-price deltas convert to
+            # real trade P&L: BUY CALL profits when price rises, BUY
+            # PUT profits when price falls.
+            direction = -1 if signal == "BUY PUT" else 1
+
             future_data = data.iloc[i + 1:i + 11]
 
             result = simulate_trade(
@@ -74,17 +98,17 @@ def run_backtest(data):
                 "Exit": result["Exit"],
                 "Result": result["Result"],
                 "HoldingCandles": result["HoldingCandles"],
-                "PnL": round(result["Exit"] - trade["Entry"], 2),
+                "PnL": round(direction * (result["Exit"] - trade["Entry"]), 2),
             })
-            
+
             if signal != "NO TRADE":
 
-                
+
                 if result["Result"] == "WIN":
 
                     winning_trades += 1
 
-                    pnl = trade["Target"] - trade["Entry"]
+                    pnl = direction * (trade["Target"] - trade["Entry"])
 
                     total_pnl += pnl
                     gross_profit += pnl
@@ -94,7 +118,7 @@ def run_backtest(data):
 
                     losing_trades += 1
 
-                    pnl = trade["StopLoss"] - trade["Entry"]
+                    pnl = direction * (trade["StopLoss"] - trade["Entry"])
 
                     total_pnl += pnl
                     gross_loss += abs(pnl)
@@ -104,17 +128,26 @@ def run_backtest(data):
 
                     eod_exit_trades += 1
 
-                    pnl = result["Exit"] - trade["Entry"]
+                    pnl = direction * (result["Exit"] - trade["Entry"])
 
                     total_pnl += pnl
-                
+
+                    # FIX: pnl was added to gross_profit/gross_loss here
+                    # but winning_trades/losing_trades were never
+                    # incremented for EOD exits -- WinRate, AverageWin/
+                    # AverageLoss and Expectancy were all computed
+                    # against a smaller trade count than the PnL totals
+                    # actually summed, skewing every derived stat
+                    # whenever EOD exits occurred.
                     if pnl > 0:
                         gross_profit += pnl
-                        
+                        winning_trades += 1
+
                     elif pnl < 0:
                         gross_loss += abs(pnl)
+                        losing_trades += 1
 
-                    trade_returns.append(pnl)                        
+                    trade_returns.append(pnl)
 
                 equity += pnl
                 

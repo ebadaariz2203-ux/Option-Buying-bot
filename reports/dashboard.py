@@ -2,7 +2,21 @@ import csv
 import os
 from collections import defaultdict
 
+import matplotlib
+
+# FIX: this dashboard runs inside the unattended trading-bot loop
+# (core/bot.py calls show_dashboard() at the end of every run() cycle,
+# right after a trade closes). The previous plt.show() calls opened a
+# blocking GUI window ("Figure 1") and froze the ENTIRE bot process
+# until someone manually closed it — on 2026-08-31 nobody was there
+# to close it after the 11:27 AM TIME EXIT, so the bot sat frozen for
+# the rest of the day and never scanned again. Force the non-interactive
+# "Agg" backend and save charts to PNG files instead of displaying them.
+matplotlib.use("Agg")
+
 import matplotlib.pyplot as plt
+
+CHARTS_DIR = "reports/charts"
 
 
 def plot_equity_curve():
@@ -41,12 +55,17 @@ def plot_equity_curve():
     plt.xlabel("Trades")
     plt.ylabel("Profit")
     plt.grid(True)
-    plt.show()
+    _save_and_close("equity_curve.png")
 
 
 def plot_drawdown():
 
-    file_name = "trade_history/trade_history.csv"
+    # FIX: was reading trade_history/trade_history.csv, a file nothing
+    # in the current pipeline writes to. Now matches plot_equity_curve()
+    # / monthly_summary() below, which already correctly read
+    # completed_trade_history.csv (see analytics/equity_curve.py for
+    # the same fix).
+    file_name = "trade_history/completed_trade_history.csv"
 
     if not os.path.exists(file_name):
         return
@@ -76,12 +95,13 @@ def plot_drawdown():
     plt.xlabel("Trades")
     plt.ylabel("Drawdown")
     plt.grid(True)
-    plt.show()
+    _save_and_close("drawdown.png")
 
 
 def plot_win_loss():
 
-    file_name = "trade_history/trade_history.csv"
+    # FIX: same stale-file issue as plot_drawdown() above.
+    file_name = "trade_history/completed_trade_history.csv"
 
     if not os.path.exists(file_name):
         return
@@ -117,7 +137,7 @@ def plot_win_loss():
     )
 
     plt.title("Win / Loss Distribution")
-    plt.show()
+    _save_and_close("win_loss.png")
 
 
 def monthly_summary():
@@ -146,6 +166,16 @@ def monthly_summary():
     for month, pnl in monthly.items():
 
         print(month, ":", round(pnl, 2))
+
+
+def _save_and_close(filename):
+    """Write the current figure to CHARTS_DIR and free it — never blocks."""
+
+    os.makedirs(CHARTS_DIR, exist_ok=True)
+    out_path = os.path.join(CHARTS_DIR, filename)
+    plt.savefig(out_path)
+    plt.close()
+    print(f"Chart saved: {out_path}")
 
 
 def show_dashboard():

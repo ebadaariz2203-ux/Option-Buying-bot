@@ -1,6 +1,7 @@
 from config.settings import (
     ADX_STRONG_TREND,
     ADX_WEAK_TREND,
+    ADX_EXHAUSTION_THRESHOLD,
     EMA_TREND_GAP
 )
 
@@ -36,6 +37,14 @@ def detect_market_regime(
     WEAK TREND:
         Moderate ADX + sufficient EMA separation
 
+    TREND EXHAUSTION:
+        Very high ADX but a NON-expanding ATR -- ADX is a lagging
+        indicator, so a reading this high usually reflects a move that
+        has already happened rather than one that's still building.
+        Without ATR expansion to back it up, this reads as a mature/
+        stalling trend at high risk of chopping sideways rather than
+        continuing (see the 2026-08-31 loss this was added for).
+
     CHOPPY:
         Weak ADX and weak EMA separation
     """
@@ -60,6 +69,19 @@ def detect_market_regime(
         and ema_gap >= 5
     ):
         return "TRENDING"
+
+    # ==========================================
+    # TREND EXHAUSTION
+    # ==========================================
+    # By this point atr_expanding is already known False (the branch
+    # above would have caught adx >= 40 with expansion), so this only
+    # fires for the specific "very high ADX, flat ATR" combination.
+
+    if (
+        adx >= ADX_EXHAUSTION_THRESHOLD
+        and not atr_expanding
+    ):
+        return "TREND EXHAUSTION"
 
     # ==========================================
     # WEAK TREND

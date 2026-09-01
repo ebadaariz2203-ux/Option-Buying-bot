@@ -4,7 +4,13 @@ import os
 
 def calculate_equity_curve():
 
-    file_path = "trade_history/trade_history.csv"
+    # FIX: was reading trade_history/trade_history.csv, a file nothing
+    # in the current pipeline writes to (save_trade_history() writes
+    # completed_trade_history.csv, which analytics/performance.py
+    # already reads correctly). This meant the equity curve silently
+    # showed stale/empty data instead of matching the real performance
+    # numbers shown right next to it.
+    file_path = "trade_history/completed_trade_history.csv"
 
     equity = 0
     equity_curve = []

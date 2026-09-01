@@ -1,5 +1,3 @@
-from risk.trailing_stop import update_trailing_stop
-
 def simulate_trade(signal, entry, stop_loss, target, future_data):
     """
     Simulate one historical trade.
@@ -8,7 +6,6 @@ def simulate_trade(signal, entry, stop_loss, target, future_data):
     for candle_no, (_, candle) in enumerate(future_data.iterrows(), start=1):
         high = float(candle["High"])
         low = float(candle["Low"])
-        atr = abs(entry - stop_loss) / 1.5
 
         if signal == "BUY CALL":
 
@@ -17,6 +14,12 @@ def simulate_trade(signal, entry, stop_loss, target, future_data):
                 return {
                     "Result": "LOSS",
                     "Exit": stop_loss,
+                    # FIX: was missing this key. backtest.py reads
+                    # result["HoldingCandles"] unconditionally, so this
+                    # branch (a same-candle gap/spike hitting both
+                    # levels) raised a KeyError and aborted the whole
+                    # backtest run.
+                    "HoldingCandles": candle_no,
                 }
 
             # Sirf Stop Loss hit
@@ -39,23 +42,40 @@ def simulate_trade(signal, entry, stop_loss, target, future_data):
 
         elif signal == "BUY PUT":
 
-            stop_loss = min(
-                stop_loss,
-                high - (atr * 1.0),
-            )
+            # FIX: this used to recompute stop_loss on every single
+            # candle via `min(stop_loss, high - atr)`, regardless of
+            # whether price had actually moved favorably -- unlike the
+            # BUY CALL branch above, which uses a static stop/target
+            # for the whole simulation. In practice this tightened the
+            # stop almost immediately on the very first candle (based
+            # on nothing but that candle's own high), causing
+            # near-instant false stop-outs for BUY PUT backtests
+            # regardless of real price action. Mirrored to match the
+            # CALL branch's static-level structure instead, including
+            # the same-candle-both-hit conservative check.
 
-            if low <= target:
+            # Same candle me SL aur Target dono hit
+            if high >= stop_loss and low <= target:
                 return {
-                    "Result": "WIN",
-                    "Exit": target,
+                    "Result": "LOSS",
+                    "Exit": stop_loss,
                     "HoldingCandles": candle_no,
-
                 }
 
+            # Sirf Stop Loss hit
             if high >= stop_loss:
                 return {
                     "Result": "LOSS",
                     "Exit": stop_loss,
+                    "HoldingCandles": candle_no,
+
+                }
+
+            # Sirf Target hit
+            if low <= target:
+                return {
+                    "Result": "WIN",
+                    "Exit": target,
                     "HoldingCandles": candle_no,
 
                 }

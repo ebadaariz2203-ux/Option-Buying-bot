@@ -45,6 +45,13 @@ def select_best_strike(signal, option_chain):
         if strike["Type"] == option_type:
             strikes.append(strike)
 
+    # FIX: max() on an empty list raises ValueError. A normal
+    # data-provider hiccup (incomplete option chain snapshot with no
+    # CE/PE entries of the needed type) used to crash the whole bot
+    # here instead of just skipping this trading cycle.
+    if not strikes:
+        return None
+
     best = max(strikes, key=lambda x: x["Volume"])
 
     return best

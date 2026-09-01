@@ -74,6 +74,25 @@ ADX_STRONG_TREND = 22   # was 25
 ADX_WEAK_TREND = 15     # was 20
 EMA_TREND_GAP = 8       # was 15 (this constant wasn't even being used by
                          # trend_strength() before - see trend_strength.py)
+
+# FIX (2026-08-31 loss review): a BUY PUT was taken at ADX=72.45 (very
+# strong) with ATR Expanding=False, EMA Gap=15.68 -> passed confluence
+# as "Strong Trend" + "HTF Confirmed" (2/2) since strong_trend only
+# looks at the EMA20/50 gap, not ADX or ATR expansion. The premium then
+# whipsawed in a ~9-point range for the full 45-minute hold (nowhere
+# near the ATR-based target) and the time exit closed it at -131.22.
+#
+# A very high ADX reading combined with a NON-expanding ATR is a known
+# trend-exhaustion pattern (the move has already happened; ADX is a
+# lagging indicator and stays elevated after momentum has stalled)
+# rather than a fresh trending opportunity. detect_market_regime() now
+# labels this combination "TREND EXHAUSTION" and bot.py hard-blocks it
+# alongside CHOPPY -- this is a narrow, evidence-based safety gate
+# (like the CHOPPY block), not a general re-tightening of the
+# confluence AND-chain, so normal trending/weak-trend days are
+# unaffected.
+ADX_EXHAUSTION_THRESHOLD = 65
+
 TRADE_MONITOR_INTERVAL = 1
 
 # ===============================
@@ -100,20 +119,32 @@ LTP_MAX_STALE_SECONDS = 10
 # NEW: Signal Confluence
 # ===============================
 # generate_trading_signal() in bot.py still stacks several confirmation
-# checks (strong_trend, higher-timeframe match) on top of the core
-# EMA/RSI/PCR signal, VWAP confirmation, and the contra-trend block.
-# Those last two (VWAP, contra-trend) remain hard requirements since
-# they confirm DIRECTION, not just trend "quality".
+# checks (strong_trend, higher-timeframe match, atr_expanding) on top
+# of the core EMA/RSI/PCR signal, VWAP confirmation, and the
+# contra-trend block. Those last two (VWAP, contra-trend) remain hard
+# requirements since they confirm DIRECTION, not just trend "quality".
 #
-# strong_trend and HTF-match are now scored instead of both being a
-# hard AND. SIGNAL_CONFIRMATIONS_REQUIRED controls how many of these
-# 2 must pass:
-#   2 = current strict behaviour (BOTH required) - default, no change
-#       in behaviour unless you edit this.
-#   1 = relaxed - only ONE of (strong_trend, HTF match) needs to pass.
-#       Use this if the bot is going multiple sessions with zero
-#       trades and you've confirmed via logs that strong_trend/HTF are
-#       the checks most often failing.
+# strong_trend, HTF-match and (as of 2026-08-31) atr_expanding are
+# scored instead of all being a hard AND. SIGNAL_CONFIRMATIONS_REQUIRED
+# controls how many of these 3 must pass:
+#   3 = strict (ALL required, closest to the original 2-of-2 behaviour
+#       now that a 3rd factor exists).
+#   2 = default. Net effect vs. the old 2-of-2 strong_trend+HTF check:
+#       PURELY ADDITIVE -- anything that passed before (both
+#       strong_trend AND htf_confirmed true) still passes regardless of
+#       atr_expanding, but a trade can now ALSO pass when only one of
+#       (strong_trend, htf_confirmed) holds as long as atr_expanding is
+#       True (real volatility expansion standing in as evidence the
+#       move is genuine). Nothing that used to pass is newly blocked.
+#   1 = relaxed - only ONE of the 3 needs to pass. Use this if the bot
+#       is going multiple sessions with zero trades and logs show these
+#       are the checks most often failing.
+#
+# NOTE: this score is independent of the TREND EXHAUSTION hard block
+# (ADX_EXHAUSTION_THRESHOLD above) -- a setup with ADX >= that
+# threshold and atr_expanding False is skipped before this score is
+# even computed, regardless of what SIGNAL_CONFIRMATIONS_REQUIRED is
+# set to.
 SIGNAL_CONFIRMATIONS_REQUIRED = 2
 
 # ===============================

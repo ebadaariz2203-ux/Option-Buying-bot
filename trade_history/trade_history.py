@@ -1,6 +1,7 @@
 import csv
 import os
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 
 def load_trade_history():
@@ -24,7 +25,13 @@ def save_trade_history(result):
 
     file_exists = os.path.exists(file_name)
 
-    now = datetime.now()
+    # FIX: was naive datetime.now() (whatever timezone the host OS
+    # happens to be set to), inconsistent with the IST-aware EntryTime
+    # recorded elsewhere in the system (core/bot.py always uses
+    # ZoneInfo("Asia/Kolkata")). On a non-IST host this could record an
+    # ExitTime that appears to be BEFORE EntryTime, corrupting any
+    # analytics keyed on holding time or trade date.
+    now = datetime.now(ZoneInfo("Asia/Kolkata"))
 
     trade_date = now.strftime("%Y-%m-%d")
     exit_time = now.strftime("%H:%M:%S")

@@ -72,6 +72,16 @@ def analyze_cycle(cycle_text):
         result["blocked_by"] = "CHOPPY"
         return result
 
+    # FIX (2026-08-31 loss review): new hard block added alongside
+    # CHOPPY in bot.py (see config/settings.py's ADX_EXHAUSTION_THRESHOLD)
+    # -- without this branch, cycles blocked here would fall through to
+    # "UNKNOWN (upgrade bot.py / re-check log)" below since they never
+    # reach the "Core Signal" print.
+    if "Market is Trend Exhaustion" in cycle_text:
+        result["core_signal"] = "NOT EVALUATED"
+        result["blocked_by"] = "TREND_EXHAUSTION"
+        return result
+
     if "Insufficient Confluence" in cycle_text:
         result["core_signal"] = "NOT EVALUATED"
         result["blocked_by"] = "CONFLUENCE"

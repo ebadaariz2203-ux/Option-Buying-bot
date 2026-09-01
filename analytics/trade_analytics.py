@@ -5,8 +5,21 @@ def calculate_trade_analytics(trades):
     Each trade should contain a 'PnL' field.
     """
 
+    # FIX: used to return {} for an empty trade list, which crashed
+    # run_backtest.py with a KeyError the moment it read
+    # trade_stats['Average Winner'] on any zero-trade day/dataset.
+    # Returning the same keys with zeroed-out values keeps the
+    # contract consistent for every caller instead of requiring each
+    # one to special-case "no trades".
     if not trades:
-        return {}
+        return {
+            "Average Winner": 0,
+            "Average Loser": 0,
+            "Largest Winner": 0,
+            "Largest Loser": 0,
+            "Max Win Streak": 0,
+            "Max Loss Streak": 0,
+        }
 
     pnl_list = [trade["PnL"] for trade in trades]
 

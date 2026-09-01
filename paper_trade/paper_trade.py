@@ -3,6 +3,8 @@ from zoneinfo import ZoneInfo
 import csv
 import os
 
+from logger.logger import logger
+
 from portfolio.portfolio_manager import (
     lock_capital,
     unlock_capital,
@@ -10,6 +12,13 @@ from portfolio.portfolio_manager import (
 )
 
 from config.settings import LAST_TRADE_FORCE_EXIT_TIME
+
+# FIX: this cost-model engine existed in the repo but had zero callers
+# -- close_paper_trade() computed final_pnl as a raw premium delta with
+# no brokerage/STT/GST/slippage deducted, overstating every reported
+# P&L versus what live trading would actually return.
+from execution.slippage import apply_slippage
+from execution.charges import calculate_charges
 
 
 def is_eod_exit_time():
@@ -73,10 +82,24 @@ def close_paper_trade(
 
         # ==========================================
         # FINAL P&L OF REMAINING QUANTITY
+        #
+        # FIX: apply realistic exit slippage and brokerage/STT/GST
+        # charges (execution/) to this leg instead of a raw premium
+        # delta, so reported P&L reflects what a live fill would
+        # actually net. exit_price itself (used for "Exit"/"ExitPrice"
+        # below and shown to the user) stays the quoted LTP -- only the
+        # P&L math accounts for the fill cost.
         # ==========================================
 
+        actual_exit_price = apply_slippage(exit_price, "SELL")
+
+        charges = calculate_charges(
+            entry_price, actual_exit_price, remaining_qty
+        )
+
         final_pnl = round(
-            (exit_price - entry_price) * remaining_qty,
+            (actual_exit_price - entry_price) * remaining_qty
+            - charges["TotalCharges"],
             2
         )
 
@@ -152,6 +175,7 @@ def close_paper_trade(
 
         trade["PartialPnL"] = realized_pnl
         trade["FinalPnL"] = final_pnl
+        trade["Charges"] = charges["TotalCharges"]
         trade["PnL"] = total_pnl
         trade["PnLPercent"] = pnl_percent
 
@@ -172,6 +196,7 @@ def close_paper_trade(
 
             "PartialPnL": realized_pnl,
             "FinalPnL": final_pnl,
+            "Charges": charges["TotalCharges"],
 
             "PnL": total_pnl,
             "PnLPercent": pnl_percent,
@@ -179,9 +204,14 @@ def close_paper_trade(
 
     except Exception as e:
 
+        # NOTE: core/bot.py's monitor_open_trade() now checks for this
+        # None return on every exit path and retries closing next tick
+        # instead of assuming the position is closed -- see the
+        # "CLOSE FAILED" handling there.
         print(
             f"[CLOSE PAPER TRADE ERROR] {e}"
         )
+        logger.error(f"close_paper_trade() failed: {e}")
 
         return None
 
