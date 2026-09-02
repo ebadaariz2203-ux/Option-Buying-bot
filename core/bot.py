@@ -1,5 +1,5 @@
 import time
-from datetime import datetime, time as dt_time
+from datetime import datetime, time as dt_time, timedelta
 from zoneinfo import ZoneInfo
 
 
@@ -30,6 +30,10 @@ from config.settings import (
     TIME_EXIT_ENABLE,
     MAX_HOLDING_MINUTES,
     LTP_MAX_STALE_SECONDS,
+    WHIPSAW_COOLDOWN_ENABLE,
+    FAST_STOP_HOLD_MINUTES,
+    CONSECUTIVE_FAST_STOPS_TRIGGER,
+    WHIPSAW_COOLDOWN_MINUTES,
 )
 
 
@@ -260,6 +264,17 @@ class TradingBot:
 
         print("==========================================")
 
+        # ==========================================
+        # WHIPSAW COOLDOWN STATE
+        # ==========================================
+        # Per-direction so a CALL streak/cooldown never affects PUT and
+        # vice versa. See config/settings.py's WHIPSAW_COOLDOWN_* block
+        # for the reasoning and the 2026-09-01 data that shaped it.
+        self.whipsaw_state = {
+            "BUY CALL": {"consecutive_fast_stops": 0, "cooldown_until": None},
+            "BUY PUT": {"consecutive_fast_stops": 0, "cooldown_until": None},
+        }
+
         # Managers
         self.order_manager = OrderManager(self.broker)
 
@@ -341,7 +356,34 @@ class TradingBot:
 
                 print("\nRunning Trading Cycle...\n")
 
-                self.run()
+                try:
+
+                    self.run()
+
+                except Exception as e:
+
+                    # FIX: a single cycle's exception (e.g. a transient
+                    # Kite API network/read timeout while fetching market
+                    # data) used to be unhandled here, propagating out of
+                    # the while loop and killing the entire day's bot
+                    # process minutes after market open. Log it and keep
+                    # the scan loop alive instead - the next cycle 5
+                    # minutes later will simply retry. If a position was
+                    # already open in-memory when this cycle failed, the
+                    # next self.run() call finds it via position_manager
+                    # and resumes monitoring it rather than opening a
+                    # second position.
+
+                    logger.error(
+                        f"Trading cycle failed with an unhandled "
+                        f"exception, will retry next cycle: {e}",
+                        exc_info=True
+                    )
+
+                    print(
+                        f"\n[ERROR] Trading cycle failed: {e}\n"
+                        f"Will retry on next scan.\n"
+                    )
 
                 # =================================
                 # NEXT SCAN
@@ -880,6 +922,111 @@ class TradingBot:
 
         print("===================================")
 
+    def _update_whipsaw_state(self, trade, exit_reason, pnl, elapsed_minutes):
+        """
+        Called from every exit path in monitor_open_trade(). Tracks, per
+        direction (CALL/PUT independently), how many FAST stop-losses
+        (a LOSING trade closed via STOP LOSS HIT within
+        FAST_STOP_HOLD_MINUTES) have happened in a row. Any other
+        outcome for that direction -- a win, a slower stop-loss, a
+        time/EOD/last-trade exit -- resets its streak to zero.
+
+        Once CONSECUTIVE_FAST_STOPS_TRIGGER is reached, that direction
+        gets a WHIPSAW_COOLDOWN_MINUTES cooldown (checked by
+        _is_whipsaw_cooldown_active() before any new entry in run()).
+        """
+
+        if not WHIPSAW_COOLDOWN_ENABLE:
+            return
+
+        signal = trade.get("Signal")
+
+        if signal not in self.whipsaw_state:
+            return
+
+        state = self.whipsaw_state[signal]
+
+        is_fast_loss = (
+            exit_reason == "STOP LOSS HIT"
+            and elapsed_minutes <= FAST_STOP_HOLD_MINUTES
+            and pnl < 0
+        )
+
+        if is_fast_loss:
+
+            state["consecutive_fast_stops"] += 1
+
+            print(
+                f"[WHIPSAW TRACK] {signal}: fast stop-loss "
+                f"#{state['consecutive_fast_stops']} in a row "
+                f"(held {elapsed_minutes:.1f} min, PnL {pnl})."
+            )
+
+            if state["consecutive_fast_stops"] >= CONSECUTIVE_FAST_STOPS_TRIGGER:
+
+                cooldown_until = self._now_ist() + timedelta(
+                    minutes=WHIPSAW_COOLDOWN_MINUTES
+                )
+                state["cooldown_until"] = cooldown_until
+
+                print(
+                    f"[WHIPSAW COOLDOWN ACTIVATED] {signal} entries "
+                    f"blocked until {cooldown_until.strftime('%H:%M:%S')} "
+                    f"IST ({WHIPSAW_COOLDOWN_MINUTES} min) after "
+                    f"{state['consecutive_fast_stops']} consecutive fast "
+                    f"stop-losses."
+                )
+
+        else:
+
+            if state["consecutive_fast_stops"] > 0:
+                print(
+                    f"[WHIPSAW TRACK] {signal}: streak reset "
+                    f"(this exit wasn't a fast stop-loss)."
+                )
+
+            state["consecutive_fast_stops"] = 0
+            state["cooldown_until"] = None
+
+    def _is_whipsaw_cooldown_active(self, signal):
+        """
+        Returns True (and blocks) if `signal`'s direction is currently
+        cooling down after CONSECUTIVE_FAST_STOPS_TRIGGER fast
+        stop-losses in a row. Naturally clears (and resets that
+        direction's streak to zero, a clean slate) once the cooldown
+        window has elapsed.
+        """
+
+        if not WHIPSAW_COOLDOWN_ENABLE or signal not in self.whipsaw_state:
+            return False
+
+        state = self.whipsaw_state[signal]
+        cooldown_until = state.get("cooldown_until")
+
+        if cooldown_until is None:
+            return False
+
+        now = self._now_ist()
+
+        if now < cooldown_until:
+
+            remaining = (cooldown_until - now).total_seconds() / 60
+
+            print(
+                f"\n[WHIPSAW COOLDOWN ACTIVE] {signal} blocked - "
+                f"{state['consecutive_fast_stops']} consecutive fast "
+                f"stop-losses. {remaining:.1f} min remaining (until "
+                f"{cooldown_until.strftime('%H:%M:%S')} IST)."
+            )
+
+            return True
+
+        # Cooldown window has passed -- give this direction a fresh start.
+        state["cooldown_until"] = None
+        state["consecutive_fast_stops"] = 0
+
+        return False
+
     def monitor_open_trade(self, trade):
         """
         Monitor an open paper trade using REAL live option premium
@@ -1014,6 +1161,10 @@ class TradingBot:
                 self._add_trade_event(
                     trade, "LAST TRADE FORCE EXIT", Price=exit_reference_price
                 )
+                self._update_whipsaw_state(
+                    trade, "LAST TRADE FORCE EXIT",
+                    close_result["PnL"], elapsed_minutes,
+                )
                 save_trade_history({
                     "Time": trade.get("EntryTime", trade.get("Timestamp", "")),
                     "Signal": trade["Signal"],
@@ -1076,6 +1227,9 @@ class TradingBot:
 
                 self.position_manager.close_position()
                 self._add_trade_event(trade, "TIME EXIT", Price=exit_reference_price)
+                self._update_whipsaw_state(
+                    trade, "TIME EXIT", close_result["PnL"], elapsed_minutes
+                )
                 self._print_exit_summary(
                     trade, close_result, "TIME EXIT",
                     entry_time, now, elapsed_minutes, peak_price,
@@ -1126,6 +1280,9 @@ class TradingBot:
                 self.position_manager.close_position()
 
                 self._add_trade_event(trade, "EOD EXIT", Price=exit_reference_price)
+                self._update_whipsaw_state(
+                    trade, "EOD EXIT", close_result["PnL"], elapsed_minutes
+                )
                 self._print_exit_summary(
                     trade, close_result, "EOD EXIT",
                     entry_time, now, elapsed_minutes, peak_price,
@@ -1307,6 +1464,9 @@ class TradingBot:
                     continue
 
                 self._add_trade_event(trade, "TARGET HIT", Price=current_price)
+                self._update_whipsaw_state(
+                    trade, "TARGET HIT", close_result["PnL"], elapsed_minutes
+                )
                 save_trade_history({
                     "Time": trade.get("EntryTime", trade.get("Timestamp", trade.get("Time", ""))),
                     "Signal": trade["Signal"],
@@ -1354,6 +1514,9 @@ class TradingBot:
                     continue
 
                 self._add_trade_event(trade, "STOP LOSS HIT", Price=current_price)
+                self._update_whipsaw_state(
+                    trade, "STOP LOSS HIT", close_result["PnL"], elapsed_minutes
+                )
                 save_trade_history({
                     "Time": trade.get("EntryTime", trade.get("Timestamp", trade.get("Time", ""))),
                     "Signal": trade["Signal"],
@@ -1599,17 +1762,58 @@ class TradingBot:
         Prints today's trades (show_daily_summary) followed by the
         all-time/final tally (show_performance) so both numbers are
         visible together at end of day, not just after whichever
-        trade happened to close last.
+        trade happened to close last. Also sends the same summary to
+        Telegram so end-of-day results are visible without needing to
+        watch the console (send_notification() already fails safe if
+        Telegram isn't configured -- never blocks/crashes the bot).
         """
 
         print("\n########## END OF DAY REPORT ##########")
 
-        self.show_daily_summary()
+        daily = self.show_daily_summary()
 
         print("\n========== FINAL TRADE SUMMARY (ALL-TIME) ==========")
         self.show_performance()
 
         print("########################################\n")
+
+        self._send_market_close_telegram_summary(daily)
+
+    def _send_market_close_telegram_summary(self, daily):
+        """
+        Formats and sends the end-of-day (daily + all-time) summary to
+        Telegram. `daily` is the dict already computed by
+        show_daily_summary() -- passed in instead of recomputed so the
+        console and Telegram versions can never disagree.
+        """
+
+        final = calculate_performance() or {}
+
+        if daily["TotalTrades"] == 0:
+            message = f"""
+    📊 END OF DAY SUMMARY — {daily['Date']}
+
+    No trades were taken today.
+
+    📈 All-Time: {final.get('TotalTrades', 0)} trades | Net P&L: {final.get('TotalPnL', 0)}
+    """
+        else:
+            message = f"""
+    📊 END OF DAY SUMMARY — {daily['Date']}
+
+    Trades       : {daily['TotalTrades']} (CE {daily['CallTrades']} / PE {daily['PutTrades']})
+    Win / Loss   : {daily['WinningTrades']}W / {daily['LosingTrades']}L ({daily['WinRate']}%)
+    Today's P&L  : {daily['TotalPnL']}
+    Best / Worst : {daily['BestTrade']} / {daily['WorstTrade']}
+    Profit Factor: {daily['ProfitFactor']}
+
+    📈 ALL-TIME TOTAL
+    Trades       : {final.get('TotalTrades', 0)}
+    Win Rate     : {final.get('WinRate', 0)}%
+    Net P&L      : {final.get('TotalPnL', 0)}
+    """
+
+        self.send_notification(message)
 
     def show_equity_curve(self):
 
@@ -1726,6 +1930,10 @@ class TradingBot:
 
         if signal == "NO TRADE":
             print("\nNo Trade Found.")
+            return
+
+        if self._is_whipsaw_cooldown_active(signal):
+            print("\nTrade Skipped (Whipsaw Cooldown)")
             return
 
         # Duplicate Trade Protection

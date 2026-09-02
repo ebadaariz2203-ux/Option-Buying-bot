@@ -148,6 +148,38 @@ LTP_MAX_STALE_SECONDS = 10
 SIGNAL_CONFIRMATIONS_REQUIRED = 2
 
 # ===============================
+# WHIPSAW COOLDOWN
+# ===============================
+# FIX (2026-09-01 review): on 2026-09-01, two trades (13:55 PUT, 14:30
+# PUT) reversed and hit their stop-loss within 1 minute of entry --
+# classic whipsaw. The obvious fix ("cooldown after every fast stop")
+# was tested against that SAME day's data first and rejected: the
+# trade immediately following each of those two fast stops (14:02 PUT,
+# 14:36 PUT) was itself a winner (+2352.62 and +402.42) -- a cooldown
+# on every single fast stop would have blocked +2755.04 of that day's
+# profit while preventing zero losses (a cooldown can only block the
+# NEXT trade, not the fast stop that already happened).
+#
+# So this only triggers after CONSECUTIVE_FAST_STOPS_TRIGGER fast
+# stop-losses IN A ROW, in the SAME direction (CALL and PUT tracked
+# independently) -- a single fast stop does nothing; a win or a
+# slower stop-loss resets that direction's streak back to zero.
+WHIPSAW_COOLDOWN_ENABLE = True
+
+# A STOP LOSS HIT exit counts as "fast" (whipsaw-like) only if it was
+# also a LOSING trade closed within this many minutes of entry. Keeps
+# profitable trailing-stop exits (e.g. a big winner that happens to
+# close in a few minutes) from ever counting.
+FAST_STOP_HOLD_MINUTES = 3
+
+# How many consecutive fast stop-losses, same direction, before that
+# direction's new entries are paused.
+CONSECUTIVE_FAST_STOPS_TRIGGER = 2
+
+# How long that direction stays paused once triggered.
+WHIPSAW_COOLDOWN_MINUTES = 15
+
+# ===============================
 # Backtest
 # ===============================
 
