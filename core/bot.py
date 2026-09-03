@@ -23,6 +23,8 @@ from config.settings import (
     PARTIAL_EXIT_ENABLE,
     PARTIAL_EXIT_TRIGGER_RR,
     BREAK_EVEN_TRIGGER_RR,
+    TRAILING_START_TRIGGER_RR,
+    TRAILING_ATR_MULTIPLIER,
     SIGNAL_CONFIRMATIONS_REQUIRED,
     NO_NEW_ENTRY_AFTER,
     TRADE_ENTRY_START_TIME,
@@ -1328,13 +1330,27 @@ class TradingBot:
                 # ==========================================
                 # ATR TRAILING STOP LOSS
                 # ==========================================
+                # FIX (2026-09-03 loss review): this used to run on
+                # every tick from the moment of entry, ratcheting SL
+                # to (current_price - ATR) within seconds -- normal
+                # premium noise is comparable in size to 1x ATR, so
+                # trades kept getting stopped out on ordinary
+                # pullbacks before any real reversal. Now it only
+                # engages once the trade has moved TRAILING_START_-
+                # TRIGGER_RR x risk in profit (same bar as
+                # break-even), and trails at the wider
+                # TRAILING_ATR_MULTIPLIER instead of the tighter
+                # ATR_MULTIPLIER used to size the original stop.
 
-                trade["StopLoss"] = update_trailing_stop(
-                    current_price,
-                    trade["StopLoss"],
-                    trade["ATR"],
-                    trade["ATRMultiplier"]
-                )
+                profit = current_price - trade["Entry"]
+
+                if profit >= (risk * TRAILING_START_TRIGGER_RR):
+                    trade["StopLoss"] = update_trailing_stop(
+                        current_price,
+                        trade["StopLoss"],
+                        trade["ATR"],
+                        TRAILING_ATR_MULTIPLIER
+                    )
 
                 if trade["StopLoss"] != old_sl:
                     self._add_trade_event(

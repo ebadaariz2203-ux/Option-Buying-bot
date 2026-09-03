@@ -2,6 +2,14 @@ from logger.logger import logger
 
 from market_data.market_data import get_nifty_data
 
+from indicators.indicators import (
+    calculate_ema,
+    calculate_rsi,
+    calculate_volume_average,
+    calculate_atr,
+    calculate_adx,
+)
+
 from backtest.backtest import run_backtest
 
 from backtest.report import save_backtest_report
@@ -14,6 +22,20 @@ def main():
     logger.info("Running Backtest...")
 
     data = get_nifty_data()
+
+    # FIX (2026-09-03): generate_signal() needs EMA_20/RSI/Volume_Avg/
+    # ATR/ADX columns, but get_nifty_data() only returns raw OHLCV --
+    # these were never computed here, so every call crashed with
+    # KeyError: 'EMA_20' on the first non-flat candle. core/bot.py's
+    # live path already does this (calculate_indicators()) before
+    # ever calling run_backtest(); mirror the same steps here.
+    data = calculate_ema(data)
+    data = calculate_ema(data, 50)
+    data = calculate_rsi(data)
+    data = calculate_volume_average(data)
+    data = calculate_atr(data)
+    data = calculate_adx(data)
+    data = data.dropna()
 
     backtest = run_backtest(data)
 

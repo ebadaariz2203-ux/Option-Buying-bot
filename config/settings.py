@@ -57,6 +57,27 @@ PARTIAL_EXIT_PERCENT = 50
 # profit on strong moves even if price never reaches the full target.
 PARTIAL_EXIT_TRIGGER_RR = 1.5
 
+# ===============================
+# TRAILING STOP LOSS
+# ===============================
+# FIX (2026-09-03 loss review): update_trailing_stop() used to run
+# unconditionally on every tick from the moment of entry, ratcheting
+# SL to (current_price - ATR_MULTIPLIER x ATR) within seconds of
+# entry. Normal intraday option-premium tick noise is comparable in
+# size to 1x ATR, so this stopped trades out on ordinary pullbacks
+# before any real reversal -- all 4 trades on 2026-09-03 moved
+# favorably at some point (one by +10.45, ~1.3R) and still
+# round-tripped to a loss or near-breakeven via this trailing stop;
+# none exited via target or EOD.
+#
+# Now: trailing only starts once the trade has reached the same 1R
+# profit threshold used for break-even (TRAILING_START_TRIGGER_RR),
+# and then trails at a wider distance (TRAILING_ATR_MULTIPLIER, wider
+# than the ATR_MULTIPLIER used to size the original stop) so normal
+# noise doesn't immediately erase the very move that earned the trail.
+TRAILING_START_TRIGGER_RR = BREAK_EVEN_TRIGGER_RR
+TRAILING_ATR_MULTIPLIER = 1.5
+
 TESTING_MODE = True
 # Market session bypass
 # False = normal market hours
