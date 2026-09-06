@@ -1443,7 +1443,18 @@ class TradingBot:
                     print(f"Realized P&L       : {realized_pnl}")
 
                     trade["Quantity"] = remaining_qty
-                    trade["StopLoss"] = trade["Entry"]
+                    # FIX: don't blindly reset SL to Entry -- if the
+                    # trailing stop (which runs earlier this same tick,
+                    # once profit >= TRAILING_START_TRIGGER_RR) had
+                    # already trailed the SL ABOVE Entry before this
+                    # partial-exit trigger fired, an unconditional
+                    # reset here would move the stop BACKWARD, giving
+                    # back profit the trailing stop had already locked
+                    # in for the remaining quantity -- happens when a
+                    # fast move jumps price past PARTIAL_EXIT_TRIGGER_RR
+                    # in a single monitoring tick. Keep whichever is
+                    # better for the trade.
+                    trade["StopLoss"] = max(trade["StopLoss"], trade["Entry"])
                     trade["PartialBooked"] = True
 
                     print("\nPartial Profit Booked Successfully!")

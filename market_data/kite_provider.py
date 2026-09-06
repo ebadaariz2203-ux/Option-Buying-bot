@@ -183,7 +183,12 @@ class KiteProvider(DataProvider):
         # SELECT NEAREST EXPIRY
         # ==========================================
 
-        today = datetime.now().date()
+        # FIX: was naive datetime.now().date() -- inconsistent with
+        # get_nifty_futures_data() above (which correctly uses IST) and
+        # with CLAUDE.md's rule that all session/time logic must use
+        # Asia/Kolkata explicitly. On a host whose system clock isn't
+        # already IST, this could pick the wrong week's expiry.
+        today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
 
         future_expiries = sorted(
             {
