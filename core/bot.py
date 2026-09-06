@@ -1403,61 +1403,71 @@ class TradingBot:
                         trade["Quantity"]
                     )
 
-                    # FIX: unlock the capital that was locked (at entry
-                    # price) for the slice of the position being exited
-                    # here. Previously only the FINAL remaining quantity's
-                    # capital was ever unlocked (in close_paper_trade()),
-                    # so every partial exit permanently shrank available
-                    # balance even though this much capital was no longer
-                    # at risk -- eventually causing valid new trades to be
-                    # rejected with "Insufficient Balance".
-                    unlock_capital(trade["Entry"] * exit_qty)
+                    # FIX: calculate_partial_exit() now returns exit_qty=0
+                    # when the position is too small (< 2 lots) to split
+                    # into two whole-lot pieces -- e.g. a single-lot
+                    # position can't be partially booked in a real
+                    # broker-valid size. In that case, just skip partial
+                    # booking entirely this tick (no state change, no
+                    # capital unlock) and let the position keep riding to
+                    # its full Target/StopLoss; we'll re-check next tick.
+                    if exit_qty > 0:
 
-                    actual_exit_price = apply_slippage(current_price, "SELL")
-                    charges = calculate_charges(
-                        trade["Entry"], actual_exit_price, exit_qty
-                    )
+                        # FIX: unlock the capital that was locked (at entry
+                        # price) for the slice of the position being exited
+                        # here. Previously only the FINAL remaining quantity's
+                        # capital was ever unlocked (in close_paper_trade()),
+                        # so every partial exit permanently shrank available
+                        # balance even though this much capital was no longer
+                        # at risk -- eventually causing valid new trades to be
+                        # rejected with "Insufficient Balance".
+                        unlock_capital(trade["Entry"] * exit_qty)
 
-                    partial_pnl = round(
-                        (actual_exit_price - trade["Entry"]) * exit_qty
-                        - charges["TotalCharges"],
-                        2
-                    )
+                        actual_exit_price = apply_slippage(current_price, "SELL")
+                        charges = calculate_charges(
+                            trade["Entry"], actual_exit_price, exit_qty
+                        )
 
-                    realized_pnl += partial_pnl
-                    self._add_trade_event(
-                        trade, "PARTIAL PROFIT BOOKED", Price=current_price
-                    )
-                    print(f"[{self._event_time()}] PARTIAL PROFIT BOOKED")
+                        partial_pnl = round(
+                            (actual_exit_price - trade["Entry"]) * exit_qty
+                            - charges["TotalCharges"],
+                            2
+                        )
 
-                    print("\n=================================")
-                    print("      PARTIAL PROFIT BOOKING")
-                    print("=================================")
+                        realized_pnl += partial_pnl
+                        self._add_trade_event(
+                            trade, "PARTIAL PROFIT BOOKED", Price=current_price
+                        )
+                        print(f"[{self._event_time()}] PARTIAL PROFIT BOOKED")
 
-                    print(f"Entry Price        : {trade['Entry']}")
-                    print(f"Partial Exit Price : {current_price} (fill: {actual_exit_price})")
-                    print(f"Exit Quantity      : {exit_qty}")
-                    print(f"Remaining Quantity : {remaining_qty}")
-                    print(f"Charges            : {charges['TotalCharges']}")
-                    print(f"Partial P&L        : {partial_pnl}")
-                    print(f"Realized P&L       : {realized_pnl}")
+                        print("\n=================================")
+                        print("      PARTIAL PROFIT BOOKING")
+                        print("=================================")
 
-                    trade["Quantity"] = remaining_qty
-                    # FIX: don't blindly reset SL to Entry -- if the
-                    # trailing stop (which runs earlier this same tick,
-                    # once profit >= TRAILING_START_TRIGGER_RR) had
-                    # already trailed the SL ABOVE Entry before this
-                    # partial-exit trigger fired, an unconditional
-                    # reset here would move the stop BACKWARD, giving
-                    # back profit the trailing stop had already locked
-                    # in for the remaining quantity -- happens when a
-                    # fast move jumps price past PARTIAL_EXIT_TRIGGER_RR
-                    # in a single monitoring tick. Keep whichever is
-                    # better for the trade.
-                    trade["StopLoss"] = max(trade["StopLoss"], trade["Entry"])
-                    trade["PartialBooked"] = True
+                        print(f"Entry Price        : {trade['Entry']}")
+                        print(f"Partial Exit Price : {current_price} (fill: {actual_exit_price})")
+                        print(f"Exit Quantity      : {exit_qty}")
+                        print(f"Remaining Quantity : {remaining_qty}")
+                        print(f"Charges            : {charges['TotalCharges']}")
+                        print(f"Partial P&L        : {partial_pnl}")
+                        print(f"Realized P&L       : {realized_pnl}")
 
-                    print("\nPartial Profit Booked Successfully!")
+                        trade["Quantity"] = remaining_qty
+                        # FIX: don't blindly reset SL to Entry -- if the
+                        # trailing stop (which runs earlier this same tick,
+                        # once profit >= TRAILING_START_TRIGGER_RR) had
+                        # already trailed the SL ABOVE Entry before this
+                        # partial-exit trigger fired, an unconditional
+                        # reset here would move the stop BACKWARD, giving
+                        # back profit the trailing stop had already locked
+                        # in for the remaining quantity -- happens when a
+                        # fast move jumps price past PARTIAL_EXIT_TRIGGER_RR
+                        # in a single monitoring tick. Keep whichever is
+                        # better for the trade.
+                        trade["StopLoss"] = max(trade["StopLoss"], trade["Entry"])
+                        trade["PartialBooked"] = True
+
+                        print("\nPartial Profit Booked Successfully!")
 
                 # ==========================================
                 # CHECK TARGET / STOP LOSS
