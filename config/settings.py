@@ -104,7 +104,25 @@ TRAILING_ATR_MULTIPLIER = 1.5
 # 78.00 peak than the eventual time-exit did. 0.5R / 50% are a
 # starting point, not re-tuned beyond this one day -- watch a few more
 # sessions (or run run_backtest.py) before trusting these numbers.
-GIVEBACK_GUARD_ENABLE = True
+#
+# DISABLED (2026-09-07, later same day): replayed this against 18 real
+# trades across 6 sessions (28 Aug - 7 Sep, tick-by-tick from the
+# session logs, methodology validated by matching 17/18 replayed PnLs
+# exactly against trade_history/completed_trade_history.csv). At these
+# defaults it's net NEGATIVE: -1656 across the sample, because it also
+# "shakes out" trades that dip early below 1R and then go on to be big
+# winners (two 2026-09-01 trades alone lost -2081 and -1642 of upside
+# this way) -- a cost that outweighed what it saved on 2026-09-07's 2
+# losers. A trigger_rr/lock_pct grid search (0.3-1.25R x 25-75%) came
+# back highly non-monotonic/noisy with no stable good region -- a
+# sign of overfitting an 18-trade sample, not a real edge. Leaving the
+# module and wiring in place (core/bot.py takes max() against
+# break-even/trailing either way, so this is inert while disabled) in
+# case a less trigger-happy redesign (e.g. requiring the pullback to
+# hold for N ticks before locking, not react to a single tick touching
+# the trigger) is worth trying later -- do not re-enable with these
+# same parameters without new evidence.
+GIVEBACK_GUARD_ENABLE = False
 GIVEBACK_GUARD_TRIGGER_RR = 0.5
 GIVEBACK_GUARD_LOCK_PCT = 50
 
