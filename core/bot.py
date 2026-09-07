@@ -776,7 +776,7 @@ class TradingBot:
 
         # Telegram Notification
         message = f"""
-    📢 OPTION BUYING BOT
+    📢 BUYING_BOT
 
     Signal : {signal}
 

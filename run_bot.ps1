@@ -23,7 +23,7 @@ chcp 65001 | Out-Null
 # Build today's session log filename
 $logFile = "logs\session_$(Get-Date -Format yyyyMMdd).txt"
 
-Write-Host "Starting Option Buying Bot..."
+Write-Host "Starting buying_bot..."
 Write-Host "Session will be saved to: $logFile"
 Write-Host ""
 

@@ -1,5 +1,5 @@
 BROKER = "PAPER"
-BOT_NAME = "Option Buying Bot"
+BOT_NAME = "buying_bot"
 VERSION = "1.0"
 PAPER_TRADING = True
 

@@ -16,7 +16,7 @@ for /f %%i in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd"') do 
 
 set LOGFILE=logs\session_%DATESTAMP%.txt
 
-echo Starting Option Buying Bot...
+echo Starting buying_bot...
 echo Session will be saved to: %LOGFILE%
 echo.
 
