@@ -78,6 +78,36 @@ PARTIAL_EXIT_TRIGGER_RR = 1.5
 TRAILING_START_TRIGGER_RR = BREAK_EVEN_TRIGGER_RR
 TRAILING_ATR_MULTIPLIER = 1.5
 
+# ===============================
+# GIVEBACK GUARD (2026-09-07 loss review)
+# ===============================
+# Gap found in break-even/trailing: both only engage once profit
+# reaches BREAK_EVEN_TRIGGER_RR/TRAILING_START_TRIGGER_RR (1.0R). Two
+# of 2026-09-07's 3 trades reversed from a decent favorable move
+# (~0.5R and ~0.94R peak) all the way down to their full original
+# StopLoss -- neither ever reached 1R, so break-even/trailing never
+# fired and both gave back 100% of the peak move plus the full risk.
+#
+# This guard is independent of break-even/trailing and engages
+# earlier: once PEAK price (not current price) has been at least
+# GIVEBACK_GUARD_TRIGGER_RR x risk in profit, ratchet the stop up to
+# lock in GIVEBACK_GUARD_LOCK_PCT% of that peak profit. It only ever
+# raises the stop (core/bot.py takes the max against the existing
+# break-even/trailing stop), so once a trade clears 1R this guard is
+# superseded by the wider trailing stop as usual.
+#
+# Verified against 2026-09-07 tick data before adding: applying this
+# retroactively would have raised trade 2's stop to ~69.08 (from a
+# fixed 61.46) and trade 3's to ~66.35 (from a fixed 58.23) --
+# converting both stop-loss losses (-1492.98, -1323.71) into modest
+# gains -- while trade 1 (the winner) would have locked in MORE of its
+# 78.00 peak than the eventual time-exit did. 0.5R / 50% are a
+# starting point, not re-tuned beyond this one day -- watch a few more
+# sessions (or run run_backtest.py) before trusting these numbers.
+GIVEBACK_GUARD_ENABLE = True
+GIVEBACK_GUARD_TRIGGER_RR = 0.5
+GIVEBACK_GUARD_LOCK_PCT = 50
+
 TESTING_MODE = True
 # Market session bypass
 # False = normal market hours

@@ -25,6 +25,9 @@ from config.settings import (
     BREAK_EVEN_TRIGGER_RR,
     TRAILING_START_TRIGGER_RR,
     TRAILING_ATR_MULTIPLIER,
+    GIVEBACK_GUARD_ENABLE,
+    GIVEBACK_GUARD_TRIGGER_RR,
+    GIVEBACK_GUARD_LOCK_PCT,
     SIGNAL_CONFIRMATIONS_REQUIRED,
     NO_NEW_ENTRY_AFTER,
     TRADE_ENTRY_START_TIME,
@@ -96,6 +99,7 @@ from risk.risk_manager import (
 
 from risk.trailing_stop import update_trailing_stop
 from risk.break_even import move_to_break_even
+from risk.giveback_guard import apply_giveback_guard
 from risk.atr_converter import convert_atr_to_option_premium
 
 
@@ -1350,6 +1354,30 @@ class TradingBot:
                         trade["StopLoss"],
                         trade["ATR"],
                         TRAILING_ATR_MULTIPLIER
+                    )
+
+                # ==========================================
+                # PROFIT GIVEBACK GUARD (2026-09-07 loss review)
+                # ==========================================
+                # Break-even/trailing above only engage past 1R. A
+                # trade that peaks below 1R and fully reverses gets no
+                # protection from either -- it rides back down to its
+                # original StopLoss. This guard looks at peak_price
+                # (max favorable excursion so far, already tracked
+                # for the trade timeline/summary above) instead of the
+                # current price, and locks in GIVEBACK_GUARD_LOCK_PCT%
+                # of the best profit seen once it reaches
+                # GIVEBACK_GUARD_TRIGGER_RR x risk -- independent of,
+                # and never lower than, whatever break-even/trailing
+                # already set.
+                if GIVEBACK_GUARD_ENABLE:
+                    trade["StopLoss"] = apply_giveback_guard(
+                        trade["Entry"],
+                        peak_price,
+                        trade["StopLoss"],
+                        risk,
+                        trigger_rr=GIVEBACK_GUARD_TRIGGER_RR,
+                        lock_pct=GIVEBACK_GUARD_LOCK_PCT,
                     )
 
                 if trade["StopLoss"] != old_sl:
