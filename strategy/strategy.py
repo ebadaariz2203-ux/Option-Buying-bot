@@ -8,6 +8,11 @@ from strategy.confirmation import (
     bearish_confirmation,
 )
 
+from config.settings import (
+    BEARISH_RSI_MAX,
+    BULLISH_RSI_MIN,
+)
+
 def generate_signal(data, option=None, debug=True):
     latest = data.iloc[-1]
 
@@ -40,10 +45,17 @@ def generate_signal(data, option=None, debug=True):
 
     if debug:
 
+        # NOTE (2026-09-08 fix): these labels used to print fixed 60/40
+        # thresholds while bullish_filter/bearish_filter actually
+        # checked different numbers (55/45, now BULLISH_RSI_MIN/
+        # BEARISH_RSI_MAX via settings.py) -- so a review reading this
+        # debug output could see "Condition False" on a trade that the
+        # real filter had actually passed. Print the live thresholds
+        # instead of hard-coding stale ones.
         print(f"Condition 1 (Close > EMA20): {close > ema20}")
-        print(f"Condition 2 (RSI > 60): {rsi > 60}")
+        print(f"Condition 2 (RSI > {BULLISH_RSI_MIN}): {rsi > BULLISH_RSI_MIN}")
         print(f"Condition 3 (Close < EMA20): {close < ema20}")
-        print(f"Condition 4 (RSI < 40): {rsi < 40}")
+        print(f"Condition 4 (RSI < {BEARISH_RSI_MAX}): {rsi < BEARISH_RSI_MAX}")
 
     if debug and pcr is not None:
 

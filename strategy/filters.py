@@ -3,6 +3,11 @@ Market Filters
 Contains all price-action based filters.
 """
 
+from config.settings import (
+    BEARISH_RSI_MAX,
+    BULLISH_RSI_MIN,
+)
+
 
 def bullish_filter(close, ema20, rsi, adx):
     """
@@ -13,22 +18,30 @@ def bullish_filter(close, ema20, rsi, adx):
     filter out weak-ADX (choppy) conditions upstream. Keeping ADX>25
     here too meant the trend had to be checked TWICE at the same
     strict bar, which was killing almost every signal.
+
+    2026-09-08: threshold moved to config.settings.BULLISH_RSI_MIN
+    (55 -> 58) -- a near-neutral RSI just past 55 backtested as the
+    weakest of the CALL entries. See settings.py for the analysis.
     """
 
     return (
         close > ema20
-        and rsi > 55
+        and rsi > BULLISH_RSI_MIN
     )
 
 
 def bearish_filter(close, ema20, rsi, adx):
     """
     Bearish market confirmation.
+
+    2026-09-08: threshold moved to config.settings.BEARISH_RSI_MAX
+    (45 -> 35) -- a near-neutral RSI just under 45 backtested as the
+    weakest of the PUT entries. See settings.py for the analysis.
     """
 
     return (
         close < ema20
-        and rsi < 45
+        and rsi < BEARISH_RSI_MAX
     )
 
 

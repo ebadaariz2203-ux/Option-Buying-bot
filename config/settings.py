@@ -249,6 +249,36 @@ CONSECUTIVE_FAST_STOPS_TRIGGER = 2
 WHIPSAW_COOLDOWN_MINUTES = 15
 
 # ===============================
+# RSI ENTRY THRESHOLDS
+# ===============================
+# strategy/filters.py's bearish_filter/bullish_filter used to hard-code
+# RSI < 45 (PUT) and RSI > 55 (CALL) -- both just past the neutral 50
+# line, so a near-neutral, weak-momentum RSI reading was enough to
+# qualify.
+#
+# 2026-09-08 review: replayed 19 real trades across 5 sessions (31 Aug,
+# 1/3/4/8 Sep, tick-by-tick from the session logs, matched 19/19
+# against trade_history/completed_trade_history.csv) and correlated
+# entry RSI against trade PnL. Both directions agreed: BUY PUT showed
+# RSI-vs-PnL correlation -0.36 (n=14) and BUY CALL showed +0.64 (n=5)
+# -- i.e. PnL got WORSE the closer entry RSI sat to the old threshold,
+# and better the further it was extended in the trade's own direction.
+# Concretely, tightening to PUT RSI < 35 / CALL RSI > 58 against that
+# same sample would have kept 10 of the 19 trades and turned their net
+# PnL from -4871.35 to +1775.95 (win rate 31.6% -> 40.0%).
+#
+# NOT independently re-validated beyond this one backtest -- CALL n=5
+# is far too small to trust on its own; the PUT side (n=14) is thin
+# too. Adopted because both signal directions pointed the same way
+# (marginal RSI = weak momentum = more whipsaw-prone), which is at
+# least a coherent story rather than a single-day fluke. A tighter cut
+# (PUT < 30 / CALL > 60) backtested even better (+3690.20 on n=7) but
+# was rejected here as almost certainly overfit to 3-4 data points --
+# revisit once more sessions have run under these settings.
+BEARISH_RSI_MAX = 35    # was 45 (bearish_filter: close < ema20 and rsi < this)
+BULLISH_RSI_MIN = 58    # was 55 (bullish_filter: close > ema20 and rsi > this)
+
+# ===============================
 # Backtest
 # ===============================
 
