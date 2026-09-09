@@ -126,6 +126,27 @@ GIVEBACK_GUARD_ENABLE = False
 GIVEBACK_GUARD_TRIGGER_RR = 0.5
 GIVEBACK_GUARD_LOCK_PCT = 50
 
+# RE-CHECKED (2026-09-09, after the 2026-09-09 12:20 PUT loss -- peaked at
+# only 0.38R, giving back the entire move to a full StopLoss loss of
+# -1161.00): re-ran the same replay methodology against a bigger sample --
+# 21 trades across 7 sessions now available (31 Aug, 1/3/4/7/8/9 Sep,
+# tick-by-tick from the session logs), grid-searching trigger_rr in
+# 0.25-0.75R x lock_pct in 30-75%. Confirms the 2026-09-07 finding rather
+# than overturning it: results are still highly non-monotonic (e.g.
+# trigger_rr=0.75 swings from -1221 to -2591 net just by changing
+# lock_pct 30->40) with no stable good region. A low trigger (0.25-0.3R)
+# would have caught 2026-09-09's loss (-1161 -> ~+150 at 0.3R/50%) but the
+# SAME setting clips three of the sample's biggest winners (2026-09-01
+# CALL +2345->+322, 2026-09-01 PUT +2352->+765, 2026-09-04 CALL
+# +1334->+345 -- a combined ~-4600 of foregone upside). Net effect across
+# the 21-trade sample at 0.3R/50% is a marginal +982 vs. no-guard, but
+# given the non-monotonic grid that number isn't trustworthy either --
+# same overfitting signature as before, just on a bigger sample. Leaving
+# this DISABLED; do not re-enable on the strength of this analysis alone.
+# The real lever for the 33%-win-rate problem is entry quality (RSI/trend
+# filters), not stop-management -- see BEARISH_RSI_MAX/BULLISH_RSI_MIN
+# below for the most recent attempt at that.
+
 TESTING_MODE = True
 # Market session bypass
 # False = normal market hours
