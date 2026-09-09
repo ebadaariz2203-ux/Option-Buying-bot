@@ -225,15 +225,24 @@ def execute_paper_trade(signal, trade):
         print("Insufficient Balance")
         return None
 
+    # FIX: was naive datetime.now() (whatever timezone the host OS
+    # happens to be set to), inconsistent with the IST-aware ExitTime
+    # recorded in trade_history.py's save_trade_history() and with
+    # is_eod_exit_time() right in this same file, both of which use
+    # ZoneInfo("Asia/Kolkata"). On a non-IST host this EntryTime could
+    # drift from the IST-aware ExitTime, corrupting holding-time
+    # analytics keyed on the two.
+    entry_now = datetime.now(ZoneInfo("Asia/Kolkata"))
+
     trade_data = {
 
         "OrderID": trade.get("OrderID", ""),
 
-        "Timestamp": datetime.now().strftime(
+        "Timestamp": entry_now.strftime(
             "%Y-%m-%d %H:%M:%S"
         ),
 
-        "Time": datetime.now().strftime(
+        "Time": entry_now.strftime(
             "%Y-%m-%d %H:%M:%S"
         ),
 
