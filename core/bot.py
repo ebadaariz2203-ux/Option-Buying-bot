@@ -1281,6 +1281,7 @@ class TradingBot:
                         "StopLoss": trade["StopLoss"],
                         "Target": trade["Target"],
                         "Status": "CLOSED",
+                        "ExitReason": "EOD EXIT",
                         "PnL": close_result["PnL"],
                         "PnLPercent": close_result["PnLPercent"],
                     })
@@ -1542,6 +1543,7 @@ class TradingBot:
                         "StopLoss": trade["StopLoss"],
                         "Target": trade["Target"],
                         "Status": "CLOSED",
+                        "ExitReason": "TARGET HIT",
                         "PnL": close_result["PnL"],
                         "PnLPercent": close_result["PnLPercent"],
                     })
@@ -1592,6 +1594,7 @@ class TradingBot:
                         "StopLoss": trade["StopLoss"],
                         "Target": trade["Target"],
                         "Status": "CLOSED",
+                        "ExitReason": "STOP LOSS HIT",
                         "PnL": close_result["PnL"],
                         "PnLPercent": close_result["PnLPercent"],
                     })
